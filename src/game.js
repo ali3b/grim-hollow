@@ -70,11 +70,18 @@ const PROP_TYPES = {
   rune_orb: { radius: 8, solid: false, spin: true },
 };
 
+// Each light gets a colour as well as a radius. Cutting the same white hole for
+// every source is what made the ruin read as one flat blue wash: a torch, a
+// brazier and a rune orb all lit their surroundings identically. The darkness
+// pass still carves the hole; the colour pass tints it afterwards.
 const LIGHTS = {
-  torch: { radius: 155 },
-  brazier: { radius: 215 },
-  rune_orb: { radius: 130 },
+  torch: { radius: 155, colour: '255, 178, 96', strength: 0.62 },
+  brazier: { radius: 215, colour: '255, 132, 58', strength: 0.72 },
+  rune_orb: { radius: 130, colour: '146, 116, 255', strength: 0.66 },
 };
+
+// The knight's own pool, so you are never in pitch dark.
+const LANTERN = { radius: 172, colour: '146, 178, 255', strength: 0.34 };
 
 const SOULS_PER_LEVEL = [0, 60, 150, 280, 460, 700, 1000];
 
@@ -452,6 +459,11 @@ export class Enemy extends Body {
       windup: 0,
       attackAnim: 0,
       castAnim: 0,
+      // Knockback is an impulse that decays, not a teleport, so a hit reads as
+      // a shove you can watch rather than a teleporting corpse.
+      kx: 0,
+      ky: 0,
+      stagger: 0,
       homeX: x,
       homeY: y,
       zone,
@@ -886,8 +898,17 @@ export class Game {
     enemy.flash = 0.15;
     enemy.aggro = true;
     enemy.state = 'chase';
-    enemy.x += Math.cos(angle) * (heavy ? 16 : 8);
-    enemy.y += Math.sin(angle) * (heavy ? 16 : 8);
+    // A boss is too heavy to be shoved around or interrupted, so heavy attacks
+    // land as damage rather than as a stun.
+    if (!enemy.isBoss) {
+      const push = heavy ? 300 : 150;
+      enemy.kx += Math.cos(angle) * push;
+      enemy.ky += Math.sin(angle) * push;
+      enemy.stagger = heavy ? 0.26 : 0.13;
+      enemy.windup = 0;
+      enemy.attackAnim = 0;
+      enemy.castAnim = 0;
+    }
     this.effects.burst(enemy.x, enemy.y - enemy.radius, heavy ? 14 : 8, {
       colour: enemy.isBoss ? '#c08cff' : '#b8342a',
       speed: heavy ? 170 : 120,
@@ -958,7 +979,12 @@ export class Game {
       if (e.aggro && dist > 700) e.aggro = false;
 
       let move = { x: 0, y: 0 };
-      if (e.aggro) {
+      if (e.stagger > 0) {
+        // Windup is the enemy's warning; being hit for it should cost them the
+        // swing, which is what makes reading a tell worth the effort.
+        e.stagger -= dt;
+        e.state = 'hurt';
+      } else if (e.aggro) {
         move = e.def.ranged ? this.#rangedBrain(e, p, dx, dy, dist, dt) : this.#meleeBrain(e, p, dx, dy, dist, dt);
         e.facing = facingFromVector(dx, dy);
       } else {
@@ -994,6 +1020,17 @@ export class Game {
       }
 
       this.world.moveCircle(e, vx * dt, vy * dt);
+
+      if (e.kx || e.ky) {
+        this.world.moveCircle(e, e.kx * dt, e.ky * dt);
+        const damp = Math.exp(-9 * dt);
+        e.kx *= damp;
+        e.ky *= damp;
+        if (Math.abs(e.kx) < 2 && Math.abs(e.ky) < 2) {
+          e.kx = 0;
+          e.ky = 0;
+        }
+      }
       this.#animateEnemy(e, dt);
     }
 
@@ -1469,50 +1506,74 @@ export class Game {
       this._lightCanvas.width = this.canvas.width;
       this._lightCanvas.height = this.canvas.height;
     }
-    // One pre-rendered radial glow, blitted per light. Building a fresh gradient
-    // for every torch on every frame is the single most expensive thing this
-    // renderer could do, and it is entirely avoidable.
-    if (!this._glow) {
-      const g = document.createElement('canvas');
+    // One pre-rendered radial glow per colour, blitted per light. Building a
+    // fresh gradient for every torch on every frame is the single most expensive
+    // thing this renderer could do, and it is entirely avoidable.
+    const build = (key, stops) => {
+      this._glows = this._glows || new Map();
+      let g = this._glows.get(key);
+      if (g) return g;
+      g = document.createElement('canvas');
       g.width = g.height = 128;
       const c = g.getContext('2d');
       const grad = c.createRadialGradient(64, 64, 0, 64, 64, 64);
-      grad.addColorStop(0, 'rgba(0,0,0,1)');
-      grad.addColorStop(0.55, 'rgba(0,0,0,0.72)');
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      for (const [at, a] of stops) grad.addColorStop(at, `rgba(${key},${a})`);
       c.fillStyle = grad;
       c.fillRect(0, 0, 128, 128);
-      this._glow = g;
-    }
+      this._glows.set(key, g);
+      return g;
+    };
+    // How far the darkness is carved back; the colour profile falls off faster,
+    // so a lit floor keeps contrast instead of going flat and milky.
+    const carve = () => build('255,255,255', [[0, 1], [0.55, 0.72], [1, 0]]);
+    const glow = (colour) => build(colour, [[0, 0.85], [0.32, 0.34], [0.68, 0.08], [1, 0]]);
 
     const lc = this._lightCanvas;
     const lctx = lc.getContext('2d');
     const W = lc.width;
     const H = lc.height;
 
-    lctx.globalCompositeOperation = 'source-over';
-    lctx.globalAlpha = 1;
-    lctx.fillStyle = 'rgba(4,3,9,0.90)';
-    lctx.fillRect(0, 0, W, H);
-    lctx.globalCompositeOperation = 'destination-out';
-
-    const punch = (x, y, r, strength) => {
+    // Collect the lights once so the darkness pass and the colour pass agree.
+    const lights = [];
+    const add = (x, y, r, colour, strength) => {
       const sx = x - this.camera.x;
       const sy = y - this.camera.y;
       if (sx < -r || sy < -r || sx > W + r || sy > H + r) return;
-      lctx.globalAlpha = strength;
-      lctx.drawImage(this._glow, sx - r, sy - r, r * 2, r * 2);
+      lights.push({ sx, sy, r, colour, strength });
     };
 
-    if (this.player && !this.player.dead) punch(this.player.x, this.player.y - 16, 172, 0.95);
+    if (this.player && !this.player.dead) {
+      add(this.player.x, this.player.y - 16, LANTERN.radius, LANTERN.colour, LANTERN.strength);
+    }
 
     for (const prop of this.world.props) {
       const light = LIGHTS[prop.kind];
       if (!light || prop.dead) continue;
       const flick = 0.92 + Math.sin(this.time * 7 + prop.phase) * 0.05 + Math.sin(this.time * 13.3 + prop.phase * 2) * 0.03;
-      punch(prop.x, prop.y - 14, light.radius * flick, 0.92);
+      add(prop.x, prop.y - 14, light.radius * flick, light.colour, light.strength * flick);
+    }
+
+    // Pass 1: carve the darkness.
+    lctx.globalCompositeOperation = 'source-over';
+    lctx.globalAlpha = 1;
+    lctx.fillStyle = 'rgba(4,3,9,0.90)';
+    lctx.fillRect(0, 0, W, H);
+    lctx.globalCompositeOperation = 'destination-out';
+    for (const l of lights) {
+      lctx.globalAlpha = 0.92;
+      lctx.drawImage(carve(), l.sx - l.r, l.sy - l.r, l.r * 2, l.r * 2);
+    }
+
+    // Pass 2: pour the colour back into the holes. Doing this on the light canvas
+    // rather than the scene matters - added on top of the scene it lifts the
+    // blacks into grey haze instead of tinting what the light actually reaches.
+    lctx.globalCompositeOperation = 'lighter';
+    for (const l of lights) {
+      lctx.globalAlpha = l.strength;
+      lctx.drawImage(glow(l.colour), l.sx - l.r, l.sy - l.r, l.r * 2, l.r * 2);
     }
     lctx.globalAlpha = 1;
+    lctx.globalCompositeOperation = 'source-over';
 
     ctx.drawImage(lc, 0, 0);
   }
