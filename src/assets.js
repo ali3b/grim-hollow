@@ -72,17 +72,19 @@ export class Sprite {
     return this.clips.get(move + '_' + dir) || this.clips.get(move + '_S') || null;
   }
 
+  // Frames are trimmed to their own ink (see tools/optimize_sheets.py), so each
+  // one carries its own size plus the offset of that crop inside the full frame.
+  // `x, y` is where the character's ground pivot sits, and the crop is placed
+  // back relative to it — which is why no per-sprite offsets are needed.
   draw(ctx, clip, x, y, scale = 1) {
     if (!clip) return;
-    const dw = this.frameWidth * scale;
-    const dh = this.frameHeight * scale;
-    const dx = x - this.pivot.x * scale;
-    const dy = y - this.pivot.y * scale;
-    const frame = clip.sample();
-    for (const layer of clip.layersInOrder(frame.index)) {
-      const f = layer.frames[frame.index];
-      if (!f) continue;
-      layer.pages.draw(ctx, f, dx, dy, dw, dh);
+    const baseX = x - this.pivot.x * scale;
+    const baseY = y - this.pivot.y * scale;
+    const index = clip.sample().index;
+    for (const layer of clip.layersInOrder(index)) {
+      const f = layer.frames[index];
+      if (!f || !f.w) continue;
+      layer.pages.draw(ctx, f, baseX + (f.ox || 0) * scale, baseY + (f.oy || 0) * scale, f.w * scale, f.h * scale);
     }
   }
 }
