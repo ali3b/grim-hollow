@@ -11,6 +11,9 @@ export class UI {
     this.ctx = canvas.getContext('2d');
     this.game = game;
     this.showMap = false;
+    this.paused = false;
+    this.savedShowMap = false;
+    this.shake = true;
   }
 
   // Narrow viewports (phones) drop the minimap and move the HUD clear of the
@@ -31,6 +34,12 @@ export class UI {
 
     if (g.state === 'title') return this.#title(ctx, W, H);
 
+    if (this.paused) {
+      this.#vitals(ctx, W, H);
+      this.#pause(ctx, W, H);
+      return;
+    }
+
     if (this.showMap) this.#bigMap(ctx, W, H);
     else if (!this.compact) this.#minimap(ctx, W, H);
 
@@ -41,6 +50,64 @@ export class UI {
 
     if (g.state === 'won') this.#endCard(ctx, W, H, true);
     if (g.state === 'lost') this.#endCard(ctx, W, H, false);
+  }
+
+  togglePause() {
+    this.paused = !this.paused;
+    if (this.paused) this.savedShowMap = this.showMap;
+    else this.showMap = this.savedShowMap;
+    return this.paused;
+  }
+
+  #pause(ctx, W, H) {
+    ctx.fillStyle = 'rgba(4,3,8,0.78)';
+    ctx.fillRect(0, 0, W, H);
+    this.#text(ctx, 'PAUSED', W / 2, H / 2 - 96, { size: 26, colour: '#cbb994', align: 'center', weight: 'bold' });
+
+    const a = this.game.audio;
+    const rows = [
+      { label: 'Sound', value: a?.enabled ? 'on' : 'off', key: 'S', act: () => a?.setEnabled(!a.enabled) },
+      { label: 'Music', value: a?.musicOn ? 'on' : 'off', key: 'N', act: () => a?.setMusic(!a.musicOn) },
+      { label: 'Volume', value: `${Math.round((a?.volume ?? 0.7) * 100)}%`, key: '-  /  +', act: null },
+      { label: 'Screen shake', value: this.shake ? 'on' : 'off', key: 'V', act: () => (this.shake = !this.shake) },
+    ];
+    let y = H / 2 - 40;
+    for (const r of rows) {
+      this.#text(ctx, r.label, W / 2 - 150, y, { size: 13, colour: '#d8cfe4' });
+      this.#text(ctx, r.value, W / 2 + 40, y, { size: 13, colour: '#ffe08a', align: 'center', weight: 'bold' });
+      this.#text(ctx, r.key, W / 2 + 190, y, { size: 11, colour: '#8b7fa8', align: 'right' });
+      y += 26;
+    }
+    this.#text(ctx, 'ESC  resume          R  restart run', W / 2, y + 22, { size: 11, colour: '#b0a6c4', align: 'center' });
+  }
+
+  // Keyboard handling for the pause menu lives here so it stays with the UI.
+  key(code) {
+    const a = this.game.audio;
+    if (code === 'KeyS') {
+      a?.setEnabled(!a.enabled);
+      a?.ui();
+      return true;
+    }
+    if (code === 'KeyN') {
+      a?.setMusic(!a.musicOn);
+      a?.ui();
+      return true;
+    }
+    if (code === 'KeyV') {
+      this.shake = !this.shake;
+      a?.ui();
+      return true;
+    }
+    if (code === 'Minus' || code === 'NumpadSubtract') {
+      a?.setVolume((a?.volume ?? 0.7) - 0.1);
+      return true;
+    }
+    if (code === 'Equal' || code === 'NumpadAdd') {
+      a?.setVolume((a?.volume ?? 0.7) + 0.1);
+      return true;
+    }
+    return false;
   }
 
   // --- pieces ------------------------------------------------------------
@@ -179,16 +246,36 @@ export class UI {
       }
     }
 
+    // Rooms: dimmed until walked into, so the map fills in as you explore.
+    for (const z of g.world.zones) {
+      if (!z.rect || z.id === 'stairs_out') continue;
+      const seen = g.roomsSeen.has(z.id);
+      if (!seen && z.kind !== 'objective') continue;
+      const [x0, y0, x1, y1] = z.rect;
+      ctx.strokeStyle =
+        z.kind === 'objective' || z.kind === 'boss'
+          ? '#b47bff'
+          : z.kind === 'spawn'
+            ? '#6fc0e0'
+            : z.kind === 'extraction'
+              ? '#6fe0a0'
+              : seen
+                ? 'rgba(224,190,120,0.75)'
+                : 'rgba(224,190,120,0.2)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + x0 * cell + 0.5, y + y0 * cell + 0.5, (x1 - x0) * cell, (y1 - y0) * cell);
+    }
+
     for (const e of g.entities) {
-      if (!(e instanceof Object) || !e.kind || e.dead) continue;
-      ctx.fillStyle = '#e05a4a';
-      ctx.fillRect(x + (e.x / map.tileW - 0.5) * cell, y + (e.y / map.tileH - 0.5) * cell, 2, 2);
+      if (!e.kind || e.dead) continue;
+      ctx.fillStyle = e.isBoss ? '#c08cff' : '#e05a4a';
+      ctx.fillRect(x + (e.x / map.tileW - 0.6) * cell, y + (e.y / map.tileH - 0.6) * cell, 2, 2);
     }
 
     const p = g.player;
     if (p) {
       ctx.fillStyle = '#ffe08a';
-      ctx.fillRect(x + (p.x / map.tileW - 0.8) * cell, y + (p.y / map.tileH - 0.8) * cell, 3, 3);
+      ctx.fillRect(x + (p.x / map.tileW - 0.9) * cell, y + (p.y / map.tileH - 0.9) * cell, 3, 3);
     }
   }
 
@@ -253,20 +340,38 @@ export class UI {
   #title(ctx, W, H) {
     ctx.fillStyle = 'rgba(4,3,8,0.82)';
     ctx.fillRect(0, 0, W, H);
-    this.#text(ctx, 'GRIM HOLLOW', W / 2, H / 2 - 40, { size: 40, colour: '#cbb994', align: 'center', weight: 'bold' });
-    this.#text(ctx, 'a dungeon arena-survivor', W / 2, H / 2 - 14, { size: 13, colour: '#8b7fa8', align: 'center' });
-    const lines = [
-      'WASD / arrows   move          J / click   attack',
-      'K / right click heavy         Shift       dash',
-      'L  drink potion               M          map',
-      '',
-      'Clear the halls, kill the Warlock, run back to the stairwell.',
-    ];
+    this.#text(ctx, 'GRIM HOLLOW', W / 2, H / 2 - 62, { size: 40, colour: '#cbb994', align: 'center', weight: 'bold' });
+    this.#text(ctx, 'a dungeon arena-survivor', W / 2, H / 2 - 36, { size: 13, colour: '#8b7fa8', align: 'center' });
+
+    const touch = document.body.classList.contains('touch');
+    const lines = touch
+      ? [
+          'drag the left side to move       tap ATK to swing',
+          'HEAVY / DASH / POTION / USE     MAP',
+          '',
+          'Clear the halls, kill the Warlock, run back to the stairwell.',
+        ]
+      : [
+          'WASD / arrows  move          J / click   attack',
+          'K / right click  heavy      Shift       dash',
+          'L  potion      E  chest     M  map      ESC  pause',
+          '',
+          'Clear the halls, kill the Warlock, run back to the stairwell.',
+        ];
     lines.forEach((l, i) => {
-      this.#text(ctx, l, W / 2, H / 2 + 18 + i * 16, { size: 11, colour: i === lines.length - 1 ? '#9ce8b0' : '#b0a6c4', align: 'center' });
+      this.#text(ctx, l, W / 2, H / 2 - 6 + i * 17, {
+        size: touch ? 10 : 11,
+        colour: i === lines.length - 1 ? '#9ce8b0' : '#b0a6c4',
+        align: 'center',
+      });
     });
     if (Math.floor(performance.now() / 500) % 2 === 0) {
-      this.#text(ctx, 'press ENTER', W / 2, H / 2 + 96, { size: 12, colour: '#ffe08a', align: 'center', weight: 'bold' });
+      this.#text(ctx, touch ? 'tap to begin' : 'press ENTER', W / 2, H / 2 + 108, {
+        size: 12,
+        colour: '#ffe08a',
+        align: 'center',
+        weight: 'bold',
+      });
     }
   }
 

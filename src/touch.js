@@ -37,7 +37,10 @@ export class TouchControls {
         ${BUTTONS.map(
           (b) => `<button class="touch-btn ${b.className}" data-action="${b.id}" type="button">${b.label}</button>`,
         ).join('')}
-        <button class="touch-btn small corner" data-action="map" type="button">MAP</button>
+        <div class="touch-corners">
+          <button class="touch-btn small corner" data-action="map" type="button">MAP</button>
+          <button class="touch-btn small corner pause" data-action="pause" type="button">II</button>
+        </div>
       </div>
       <div class="touch-hint" id="touch-hint">drag the left side to move &middot; tap ATK to swing</div>
     `;
@@ -144,15 +147,17 @@ export class TouchControls {
       el.addEventListener('contextmenu', (e) => e.preventDefault());
     }
 
-    const map = this.root.querySelector('[data-action="map"]');
-    map.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      map.classList.add('down');
-      this.input.press('map');
-    });
-    const clear = () => map.classList.remove('down');
-    map.addEventListener('pointerup', clear);
-    map.addEventListener('pointercancel', clear);
-    map.addEventListener('pointerleave', clear);
+    for (const action of ['map', 'pause']) {
+      const btn = this.root.querySelector(`[data-action="${action}"]`);
+      btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        btn.classList.add('down');
+        this.input.press(action);
+      });
+      const clear = () => btn.classList.remove('down');
+      btn.addEventListener('pointerup', clear);
+      btn.addEventListener('pointercancel', clear);
+      btn.addEventListener('pointerleave', clear);
+    }
   }
 }

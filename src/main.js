@@ -6,6 +6,7 @@ import { Game, World } from './game.js';
 import { Input } from './input.js';
 import { TouchControls, isTouchDevice } from './touch.js';
 import { UI } from './ui.js';
+import { Audio } from './audio.js';
 
 const TILESET_DIR = 'assets/tilesets/hollow_floor';
 const MAP_DIR = 'assets/maps/hollow_deep';
@@ -66,6 +67,20 @@ async function boot() {
   const input = new Input(canvas);
   const game = new Game(canvas, world, input);
   const ui = new UI(canvas, game);
+  const audio = new Audio();
+  game.audio = audio;
+
+  // Browsers only allow audio after a gesture; wire it to the first one of any kind.
+  const wake = () => {
+    audio.resume();
+    if (game.state === 'play') audio.setMusic(true);
+    window.removeEventListener('pointerdown', wake);
+    window.removeEventListener('keydown', wake);
+    window.removeEventListener('touchstart', wake);
+  };
+  window.addEventListener('pointerdown', wake);
+  window.addEventListener('keydown', wake);
+  window.addEventListener('touchstart', wake);
 
   // Debug flags: ?autostart skips the title card, ?touch forces the on-screen
   // controls on a desktop so the mobile layout can be checked anywhere.
@@ -107,10 +122,31 @@ async function boot() {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
 
+    if (input.consume('pause')) {
+      if (game.state === 'play') {
+        ui.togglePause();
+        game.audio?.ui();
+      }
+    }
+    if (ui.paused) {
+      ui.key(input.lastPauseKey);
+      input.lastPauseKey = null;
+      game.camera.scale = ui.shake ? 1 : 0;
+      game.draw();
+      ui.draw(dt);
+      input.endFrame();
+      requestAnimationFrame(frame);
+      return;
+    }
+
     // Title and end cards advance on any "confirm" input, keyboard or touch.
     const confirm = () => input.consume('interact') || input.consume('attack');
-    if (game.state === 'title' && confirm()) game.reset();
-    if ((game.state === 'won' || game.state === 'lost') && game.player && (game.player.deathTimer > 1.6 || game.bossDead) && confirm()) {
+    if (game.state === 'title' && confirm()) {
+      game.reset();
+      game.audio?.resume();
+      game.audio?.setMusic(true);
+    }
+    if ((game.state === 'won' || game.state === 'lost') && (game.bossDead || (game.player && game.player.deathTimer > 1.6)) && confirm()) {
       game.reset();
     }
     if (input.consume('map')) ui.toggleMap();

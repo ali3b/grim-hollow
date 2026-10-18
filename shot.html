@@ -1,0 +1,33 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#06040a}canvas{display:block;image-rendering:pixelated}</style></head><body>
+<canvas id="game" width="1180" height="760"></canvas>
+<script type="module">
+import { loadTileset, loadMap, loadSprite, loadJSON } from '/src/assets.js';
+import { Game, World } from '/src/game.js';
+import { Input } from '/src/input.js';
+import { UI } from '/src/ui.js';
+const q=new URLSearchParams(location.search);
+const zoneId=q.get('zone')||'patrol_crossroads', secs=Number(q.get('s')||3);
+const tileset=await loadTileset('/assets/tilesets/hollow_floor','hollow_floor');
+const map=await loadMap('/assets/maps/hollow_deep', tileset);
+const manifest=await loadJSON('/assets/sprites/index.json');
+const sprites={};
+for(const n of Object.keys(manifest)){try{sprites[n]=await loadSprite('/assets/sprites/'+n,n,manifest[n]);}catch(e){}}
+const canvas=document.getElementById('game');
+const world=new World(map,tileset,sprites); const input=new Input(canvas);
+const game=new Game(canvas,world,input); const ui=new UI(canvas,game);
+game.reset(); game.audio=new Proxy({},{get:()=>()=>{}});
+if(q.get('hp')) game.player.hp=Number(q.get('hp'));
+const z=world.zone(zoneId); const c=world.centreOfRect(z.rect);
+game.player.x=c.x; game.player.y=c.y; game.update(1/60); game.camera.snapTo(game.player.x,game.player.y);
+const DT=1/60;
+for(let t=0;t<secs;t+=DT){
+  let best=null,bd=1e9;
+  for(const e of game.entities){if(!e.kind||e.hp<=0||e.summon>0)continue;const d=Math.hypot(e.x-game.player.x,e.y-game.player.y);if(d<bd){bd=d;best=e;}}
+  if(best&&bd<80){const a=Math.atan2(best.y-game.player.y,best.x-game.player.x);input.axis.x=Math.cos(a);input.axis.y=Math.sin(a);}
+  else{input.axis.x=0;input.axis.y=0;}
+  input.pressed=new Set(Math.floor(t*60)%14===0?['attack']:[]);
+  game.update(DT); input.pressed.clear();
+}
+if(q.get('pause')) ui.togglePause();
+game.draw(); ui.draw(1/60); document.title='READY';
+</script></body></html>

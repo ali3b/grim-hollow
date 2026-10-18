@@ -1,0 +1,59 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="background:#06040a;color:#cfc6da;font:12px monospace">
+<canvas id="game" width="1180" height="760" style="display:block"></canvas><pre id="out">…</pre>
+<script>window.addEventListener('error',e=>{document.getElementById('out').textContent='ERR: '+e.message+' @'+e.filename+':'+e.lineno});window.addEventListener('unhandledrejection',e=>{document.getElementById('out').textContent='REJ: '+e.reason});</script>
+<script type="module">
+import { loadTileset, loadMap, loadSprite, loadJSON } from '/src/assets.js';
+import { Game, World, Enemy } from '/src/game.js';
+import { Input } from '/src/input.js';
+import { UI } from '/src/ui.js';
+const log=[];
+const tileset=await loadTileset('/assets/tilesets/hollow_floor','hollow_floor');
+const map=await loadMap('/assets/maps/hollow_deep', tileset);
+const manifest=await loadJSON('/assets/sprites/index.json');
+const sprites={};
+for(const n of Object.keys(manifest)){try{sprites[n]=await loadSprite('/assets/sprites/'+n,n,manifest[n]);}catch(e){log.push('load fail '+n);}}
+const canvas=document.getElementById('game');
+const world=new World(map,tileset,sprites); const input=new Input(canvas);
+const game=new Game(canvas,world,input); const ui=new UI(canvas,game);
+game.reset(); game.audio=new Proxy({},{get:()=>()=>{}});
+// Worst case: stand in the crossroads with everything awake.
+const z=world.zone('patrol_crossroads'); const c=world.centreOfRect(z.rect);
+game.player.x=c.x; game.player.y=c.y;
+for (const zz of world.zones) if (zz.kind==='patrol') zz.entered=true;
+game.update(1/60);
+// Wake every zone's garrison at once: the heaviest frame the game can produce.
+for (const zz of world.zones.filter(z => z.kind === 'patrol')) {
+  for (const k of zz.enemies || []) {
+    const p = world.centreOfRect(zz.rect);
+    const e = new Enemy(k, p.x + (Math.random()-0.5)*40, p.y + (Math.random()-0.5)*40, zz);
+    e.anim = new (game.sprites[k].constructor.prototype ? Object : Object)();
+    e.aggro = true;
+    game.entities.push(e);
+  }
+}
+for (const e of game.entities) if (e.kind === 'darklord') e.summon = 0;
+const { Animator } = await import('/src/assets.js');
+for (const e of game.entities) if (e instanceof Enemy && !e.anim?.clip) e.anim = new Animator(game.sprites[e.kind]);
+// Count canvas work instead of wall-clock: headless virtual time reports 0ms.
+const ctx = canvas.getContext('2d');
+let drawCalls = 0, gradCalls = 0;
+const realDraw = ctx.drawImage.bind(ctx), realGrad = ctx.createRadialGradient.bind(ctx);
+ctx.drawImage = (...a) => { drawCalls++; return realDraw(...a); };
+ctx.createRadialGradient = (...a) => { gradCalls++; return realGrad(...a); };
+const N=240, times=[];
+for(let i=0;i<N;i++){
+  input.axis.x=Math.cos(i*0.03); input.axis.y=Math.sin(i*0.03);
+  input.pressed=new Set(i%14===0?['attack']:[]);
+  drawCalls = 0; gradCalls = 0;
+  game.update(1/60); game.draw(); ui.draw(1/60);
+  times.push({d: drawCalls, g: gradCalls}); input.pressed.clear();
+}
+const avg = (k) => (times.reduce((s,t)=>s+t[k],0)/times.length).toFixed(1);
+const peak = (k) => Math.max(...times.map(t=>t[k]));
+const live=game.entities.filter(e=>e.kind).length;
+log.push(`entities alive : ${live}`);
+log.push(`props drawn    : ${world.props.filter(p=>!p.dead).length}`);
+log.push(`drawImage / frame  avg ${avg('d')}   peak ${peak('d')}`);
+log.push(`radial gradients   avg ${avg('g')}   peak ${peak('g')}   (0 = all cached)`);
+document.getElementById('out').textContent=log.join('\n');
+</script></body></html>

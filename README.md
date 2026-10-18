@@ -34,9 +34,21 @@ It must be served over HTTP (the map and tileset are fetched as JSON) — openin
 | Drink a potion | `L`, `Q` | **POTION** |
 | Open a chest | `E`, `Enter` | **USE** |
 | Map | `M` | **MAP** |
+| Pause / settings | `Esc`, `P`, **II** | **II** |
+
+In the pause menu: `S`/`N` steps through the settings, `V` toggles sound,
+`-`/`+` change the volume, `Esc` or `P` resumes.
 
 `?autostart` skips the title card. `?touch=1` forces the on-screen controls on a
 desktop, which is handy for checking the mobile layout.
+
+### Sound
+
+Everything is synthesised at runtime with the Web Audio API — `src/audio.js`,
+no audio files. An ambient drone that tightens as enemies close in, plus swings,
+impacts, dashes, pickups, level-ups and the Warlock's roar. Browsers only allow
+audio after a gesture, so it starts with your first tap or keypress and can be
+muted from the pause menu.
 
 ### The run
 
@@ -71,10 +83,11 @@ icon-*.png              icons composited from the generated art
 src/
   main.js               boot, responsive canvas, game loop
   assets.js             tileset / Tiled map / layered sprite-sheet loaders
+  audio.js              runtime-synthesised music and sound effects
   game.js               world, camera, entities, AI, combat, rendering, lighting
   input.js              keyboard + mouse, funnelled into one action set
   touch.js              floating stick and action buttons
-  ui.js                 HUD, minimap, map screen, title and end cards
+  ui.js                 HUD, minimap, map screen, pause/settings, title and end cards
 assets/
   tilesets/hollow_floor/  atlas PNG + Tiled .tsj (wangset included)
   maps/hollow_deep/       .tmj + the tileset it uses
@@ -82,8 +95,12 @@ assets/
   sprites/<name>/         generated sheets + JSON, one folder per sprite
 tools/
   sync_assets.py           copy the generator's export in and write index.json
+  optimize_sheets.py       crop each frame to its ink box and shelf-pack the atlas
   make_icons.py            build the PWA icons from the game's own art
 selftest.html           headless playthrough: spawns, combat, boss, win
+stress.html             headless fuzz: randomised input, hunting for runtime errors
+perf.html               headless draw-call counter
+shot.html               headless screenshot rig for checking a layout
 ```
 
 ### Notes on the generated data
@@ -105,14 +122,21 @@ halves the download — worth it on mobile.
 
 ### Testing
 
-`selftest.html` runs a scripted headless playthrough of every room plus the
-boss, and prints spawn counts, kills, levels and the final state. Serve the
-folder and open it; or headless:
+Three headless harnesses, all driven the same way — serve the folder and open
+the page, or run Chrome against it:
 
 ```bash
 google-chrome --headless=new --disable-gpu --virtual-time-budget=120000 \
   --dump-dom http://localhost:8080/selftest.html | grep -o '<pre id="out">.*</pre>'
 ```
 
-Expected tail: `bossDead=true exitOpen=true` / `final state=won` /
-`runtime errors: none`.
+| Page | What it does | Expected |
+|---|---|---|
+| `selftest.html` | scripted playthrough of every room plus the boss | `bossDead=true exitOpen=true` / `final state=won` / `runtime errors: none` |
+| `stress.html` | 40 runs × 900 frames of randomised input, spawning and killing as it goes | `STRESS PASSED: 40 runs x 900 frames` |
+| `perf.html` | counts `drawImage` calls and radial gradients per frame | ~1,250 draws, gradients in single digits |
+| `shot.html` | renders one room and screenshots it (`?zone=`, `?s=`, `?touch=1`, `?hp=`) | — |
+
+`selftest` and `stress` are the ones that matter: they run the real game loop, so
+a crash in combat logic shows up as `runtime errors:` rather than only in a
+browser console nobody opens.

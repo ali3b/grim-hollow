@@ -13,6 +13,8 @@ const ACTIONS = {
   KeyE: 'interact',
   Enter: 'interact',
   KeyM: 'map',
+  Escape: 'pause',
+  KeyP: 'pause',
 };
 
 export class Input {
@@ -22,6 +24,8 @@ export class Input {
     this.axis = { x: 0, y: 0 };
     this.virtualAxis = null;
     this.mouse = { x: 0, y: 0, down: false };
+    // The last key pressed this frame, for menus that need the key itself.
+    this.lastPauseKey = null;
 
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
@@ -32,6 +36,7 @@ export class Input {
         this.down.add(action);
       }
       this.down.add(e.code);
+      this.lastPauseKey = e.code;
       this.#axis();
     });
 

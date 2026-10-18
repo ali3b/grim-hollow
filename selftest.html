@@ -8,6 +8,7 @@
       import { loadTileset, loadMap, loadSprite, loadJSON, placeholderSprite } from './src/assets.js';
       import { Game, World } from './src/game.js';
       import { Input } from './src/input.js';
+      import { Audio } from './src/audio.js';
 
       const out = document.getElementById('out');
       const log = [];
@@ -33,6 +34,9 @@
       const input = new Input(canvas);
       const game = new Game(canvas, world, input);
       game.reset();
+      // The audio graph needs a user gesture in a browser; in the harness we
+      // stub it so the same call sites are exercised without a context.
+      game.audio = new Proxy({}, { get: () => () => {} });
 
       // A fake player: walk to each patrol zone, fight everything, then the boss.
       const DT = 1 / 60;
@@ -59,6 +63,8 @@
         game.player.x = c.x;
         game.player.y = c.y;
         game.player.hp = game.player.maxHp;
+        game.freeze = 0; // hitstop would otherwise swallow the first frame
+        step([0, 0]);
         step([0, 0]);
         const spawned = alive();
         // 12 seconds of "hold attack and swing at whatever is nearest".

@@ -1,0 +1,44 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="background:#06040a;color:#cfc6da;font:12px monospace">
+<pre id="out">…</pre>
+<script>window.addEventListener('error',e=>{document.getElementById('out').textContent='ERR '+e.message+' @'+e.lineno;});
+window.addEventListener('unhandledrejection',e=>{document.getElementById('out').textContent='REJ '+e.reason;});</script>
+<script type="module">
+import { loadTileset, loadMap, loadSprite, loadJSON } from '/src/assets.js';
+import { Game, World, Enemy } from '/src/game.js';
+import { Input } from '/src/input.js';
+const log=[];
+try{
+const tileset=await loadTileset('/assets/tilesets/hollow_floor','hollow_floor');
+const map=await loadMap('/assets/maps/hollow_deep', tileset);
+const manifest=await loadJSON('/assets/sprites/index.json');
+const sprites={};
+for(const n of Object.keys(manifest)){try{sprites[n]=await loadSprite('/assets/sprites/'+n,n,manifest[n]);}catch(e){}}
+const canvas=document.createElement('canvas'); canvas.width=800; canvas.height=500;
+const world=new World(map,tileset,sprites); const input=new Input(canvas);
+const game=new Game(canvas,world,input); game.reset(); game.audio=new Proxy({},{get:()=>()=>{}});
+const c=world.centreOfRect(world.zone('patrol_crossroads').rect);
+game.player.x=c.x; game.player.y=c.y;
+// wake the room
+let seed=12345; const rnd=()=>{seed=(seed*1103515245+12345)&0x7fffffff; return seed/0x7fffffff;};
+for(let run=0; run<40; run++){
+  game.reset(); game.audio=new Proxy({},{get:()=>()=>{}});
+  game.player.x=c.x; game.player.y=c.y; game.freeze=0;
+  game.update(1/60);
+  for(let i=0;i<900;i++){
+    input.axis.x=rnd()<0.15?0:Math.cos(i*0.11); input.axis.y=rnd()<0.15?0:Math.sin(i*0.11);
+    input.pressed=new Set();
+    const r=rnd();
+    if(r<0.35) input.pressed.add('attack');
+    else if(r<0.45) input.pressed.add('heavy');
+    else if(r<0.50) input.pressed.add('dash');
+    else if(r<0.53) input.pressed.add('potion');
+    game.player.hp=game.player.maxHp;
+    game.update(1/60); game.draw();
+    input.pressed.clear();
+  }
+  log.push('run '+run+' ok  kills='+game.stats.kills);
+}
+log.push('STRESS PASSED: 40 runs x 900 frames');
+}catch(e){log.push('THREW: '+e.message);log.push(e.stack.split('\n').slice(0,4).join('\n'));}
+document.getElementById('out').textContent=log.slice(-6).join('\n');
+</script></body></html>

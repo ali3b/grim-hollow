@@ -195,12 +195,23 @@
         right: 170px;
         bottom: 60px;
       }
-      .touch-btn.corner {
+      .touch-corners {
         position: fixed;
-        left: calc(14px + env(safe-area-inset-left));
-        top: calc(14px + env(safe-area-inset-top));
+        left: calc(12px + env(safe-area-inset-left));
+        top: calc(12px + env(safe-area-inset-top));
+        display: flex;
+        gap: 8px;
+        pointer-events: none;
+      }
+      .touch-btn.corner {
+        position: static;
         width: 48px;
         height: 48px;
+        pointer-events: auto;
+      }
+      .touch-btn.pause {
+        font-size: 15px;
+        letter-spacing: 0;
       }
       .touch-hint {
         position: absolute;
@@ -246,10 +257,12 @@
       }
       /* Narrow: the minimap is gone, so MAP can live in the top right. */
       @media (max-width: 780px) {
-        .touch-btn.corner {
+        .touch-corners {
           left: auto;
           right: calc(10px + env(safe-area-inset-right));
           top: calc(34px + env(safe-area-inset-top));
+        }
+        .touch-btn.corner {
           width: 46px;
           height: 46px;
         }

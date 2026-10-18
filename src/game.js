@@ -15,7 +15,7 @@ const P = {
   dashTime: 0.16,
   dashCooldown: 0.55,
   maxHp: 100,
-  attackTime: 0.32,
+  attackTime: 0.30,
   attackReach: 48,
   attackArc: 2.0,
   attackDamage: 22,
@@ -24,7 +24,30 @@ const P = {
   heavyArc: 2.7,
   heavyDamage: 46,
   invulnAfterHit: 0.55,
+  comboWindow: 0.55,
 };
+
+// The light attack chains into three beats; each is a little faster and hits a
+// little harder, so mashing is a real option but so is committing.
+const COMBO = [
+  { move: 'attack_1', damage: 1.0, reach: 1.0, arc: 1.0, time: 0.32 },
+  { move: 'attack_1', damage: 1.15, reach: 1.05, arc: 1.05, time: 0.28 },
+  { move: 'attack_2', damage: 1.7, reach: 1.2, arc: 1.25, time: 0.4 },
+];
+
+// A swing captures its parameters when it starts. Reading them back out of the
+// combo counter every frame means anything that moves that counter mid-swing can
+// desync the animation from the damage, so the beat is stored on the swing.
+const HEAVY_BEAT = {
+  heavy: true,
+  move: 'attack_2',
+  damage: 2.1,
+  reach: P.heavyReach,
+  arc: P.heavyArc,
+  time: P.heavyTime,
+};
+
+const ENEMY_WINDUP = 0.26;
 
 const ENEMY_TYPES = {
   goblin_brute: { hp: 36, speed: 76, damage: 11, reach: 32, cooldown: 1.1, souls: 9, range: 22, aggro: 190, scale: 1 },
@@ -179,7 +202,7 @@ function readZones(map) {
 
 export class Camera {
   constructor(map, viewW, viewH) {
-    Object.assign(this, { map, x: 0, y: 0, viewW, viewH, shake: 0 });
+    Object.assign(this, { map, x: 0, y: 0, viewW, viewH, shake: 0, scale: 1 });
   }
 
   setView(w, h) {
@@ -210,7 +233,8 @@ export class Camera {
   }
 
   kick(amount) {
-    this.shake = Math.min(15, this.shake + amount);
+    if (!this.scale) return;
+    this.shake = Math.min(15, this.shake + amount * this.scale);
   }
 }
 
@@ -361,7 +385,6 @@ export class Player extends Body {
     this.dashTimer = 0;
     this.dashCooldown = 0;
     this.attackTimer = 0;
-    this.attackHeavy = false;
     this.attackHits = new Set();
     this.attackProps = new Set();
     this.invuln = 0;
@@ -370,6 +393,12 @@ export class Player extends Body {
     this.deathTimer = 0;
     this.inWater = false;
     this.anim = null;
+    this.comboStep = -1;
+    this.comboTimer = 0;
+    this.swing = null;
+    this.swingId = 0;
+    this.ghosts = [];
+    this.footTimer = 0;
   }
 
   addSouls(n) {
@@ -420,6 +449,7 @@ export class Enemy extends Body {
       state: 'idle',
       stateTimer: Math.random() * 1.4,
       attackCd: Math.random() * def.cooldown,
+      windup: 0,
       attackAnim: 0,
       castAnim: 0,
       homeX: x,
@@ -484,6 +514,11 @@ export class Game {
     this.projectiles = [];
     this.pickups = [];
     this.player = null;
+    this.freeze = 0;
+    this.lookAhead = { x: 0, y: 0 };
+    this.lavaTimer = 0;
+    this.roomsSeen = new Set();
+    this.audio = null;
 
     this.spawn = world.zone('entry') || { rect: [8, 34, 10, 36], name: 'Entry' };
     this.extraction = world.zone('stairs_out');
@@ -502,6 +537,10 @@ export class Game {
     this.bossDead = false;
     this.exitOpen = false;
     this.stats = { kills: 0, damageTaken: 0 };
+    this.freeze = 0;
+    this.lookAhead = { x: 0, y: 0 };
+    this.lavaTimer = 0;
+    this.roomsSeen = new Set([this.spawn.id]);
 
     for (const p of this.world.props) {
       p.dead = false;
@@ -509,7 +548,9 @@ export class Game {
       p.hp = p.maxHp;
       p.state = PROP_TYPES[p.kind].state || 'idle';
     }
-    for (const t of this.triggers) t.entered = false;
+    for (const t of this.triggers) {
+      t.entered = false;
+    }
 
     const start = this.world.centreOfRect(this.spawn.rect);
     this.player = new Player(start.x, start.y);
@@ -538,6 +579,14 @@ export class Game {
       return;
     }
 
+    // Hitstop: a few frozen frames on impact. The world holds still, the
+    // shake and the particles still read, so a hit lands with weight.
+    if (this.freeze > 0) {
+      this.freeze -= dt;
+      this.camera.shake = Math.max(0, this.camera.shake - dt * 30);
+      return;
+    }
+
     this.#updateTriggers();
     this.#updatePlayer(dt);
     this.#updateEnemies(dt);
@@ -546,18 +595,40 @@ export class Game {
     this.#updateProps(dt);
     this.effects.update(dt);
 
-    this.camera.follow(this.player.x, this.player.y, dt);
+    this.camera.follow(this.player.x + this.lookAhead.x, this.player.y + this.lookAhead.y, dt);
     this.camera.shake = Math.max(0, this.camera.shake - dt * 42);
 
     const here = this.map.terrainAtPx(this.player.x, this.player.y);
+    const wasWater = this.player.inWater;
     this.player.inWater = here === 'water';
-    if (here === 'lava' && this.player.hurt(22 * dt, this.effects)) this.camera.kick(2);
+    if (here === 'lava') {
+      if (this.player.hurt(22 * dt, this.effects)) this.camera.kick(2);
+      this.lavaTimer = (this.lavaTimer || 0) + dt;
+      if (this.lavaTimer > 0.45) {
+        this.lavaTimer = 0;
+        this.effects.burst(this.player.x, this.player.y - 6, 5, { colour: '#ff7a2a', speed: 70, life: 0.5, lift: 60, gravity: -40 });
+        this.audio?.lava();
+      }
+    }
+    if (this.player.inWater !== wasWater && this.player.inWater) {
+      this.effects.ring(this.player.x, this.player.y, { colour: '#6fd0ff', grow: 120, radius: 6, life: 0.3 });
+    }
+
+    // Tension drives the ambience: more live enemies, more menacing.
+    if (this.audio) {
+      const threat = Math.min(1, this.entities.filter((e) => e instanceof Enemy && !e.dead).length / 8 + (this.bossSpawned ? 0.4 : 0));
+      this.audio.setTension(threat);
+    }
 
     this.#checkExtraction();
 
     if (this.player.dead) {
       this.player.deathTimer += dt;
-      if (this.player.deathTimer > 1.5) this.state = 'lost';
+      if (this.player.deathTimer > 1.5) {
+        this.state = 'lost';
+        this.audio?.lose();
+        this.audio?.setTension(0);
+      }
     }
   }
 
@@ -571,6 +642,7 @@ export class Game {
     for (const z of this.triggers) {
       if (z.entered || !this.#pointInRect(this.player.x, this.player.y, z.rect)) continue;
       z.entered = true;
+      this.roomsSeen.add(z.id);
       if (z.kind === 'patrol') {
         for (const kind of z.enemies || []) {
           const p = this.world.randomPointIn(z, this.rng);
@@ -595,11 +667,16 @@ export class Game {
     this.entities.push(boss);
     this.say('The Warlock rises. Break his rune!', '#c08cff');
     this.camera.kick(11);
+    this.audio?.bossRoar();
   }
 
   #checkExtraction() {
     if (!this.exitOpen || !this.extraction || this.player.dead) return;
-    if (this.#pointInRect(this.player.x, this.player.y, this.extraction.rect)) this.state = 'won';
+    if (this.#pointInRect(this.player.x, this.player.y, this.extraction.rect)) {
+      this.state = 'won';
+      this.audio?.win();
+      this.audio?.setTension(0);
+    }
   }
 
   // --- player ------------------------------------------------------------
@@ -612,6 +689,8 @@ export class Game {
     p.hurtFlash = Math.max(0, p.hurtFlash - dt);
     p.dashCooldown = Math.max(0, p.dashCooldown - dt);
     p.attackTimer = Math.max(0, p.attackTimer - dt);
+    p.comboTimer = Math.max(0, p.comboTimer - dt);
+    if (p.comboTimer <= 0) p.comboStep = -1;
     p.attackHits.clear();
     p.attackProps.clear();
 
@@ -626,12 +705,23 @@ export class Game {
     p.vx = dx * P.speed;
     p.vy = dy * P.speed;
 
+    // Camera drifts a little ahead of where you are heading.
+    const wantAhead = 46;
+    this.lookAhead.x = lerp(this.lookAhead.x, dx * wantAhead, 1 - Math.pow(0.02, dt));
+    this.lookAhead.y = lerp(this.lookAhead.y, dy * wantAhead, 1 - Math.pow(0.02, dt));
+
     if (inp.consume('dash') && p.dashCooldown <= 0 && len > 0) {
       p.dashTimer = P.dashTime;
       p.dashCooldown = P.dashCooldown;
       p.invuln = Math.max(p.invuln, P.dashTime + 0.08);
+      for (let i = 0; i < 4; i++) {
+        p.ghosts.push({ x: p.x - dx * i * 5, y: p.y - dy * i * 5, life: 0.3, maxLife: 0.3 });
+      }
       this.effects.burst(p.x, p.y - 12, 10, { colour: '#8fa6d8', speed: 130, life: 0.35, lift: 12 });
+      this.audio?.dash();
     }
+    for (const g of p.ghosts) g.life -= dt;
+    p.ghosts = p.ghosts.filter((g) => g.life > 0);
 
     let speed = p.inWater ? P.speed * 0.62 : P.speed;
     if (p.dashTimer > 0) {
@@ -642,23 +732,47 @@ export class Game {
     const heavy = inp.consume('heavy');
     const light = inp.consume('attack');
     if ((heavy || light) && p.attackTimer <= 0) {
-      p.attackTimer = heavy ? P.heavyTime : P.attackTime;
-      p.attackHeavy = heavy;
+      if (heavy) {
+        p.comboStep = -1;
+        p.swing = HEAVY_BEAT;
+      } else {
+        p.comboStep = p.comboTimer > 0 ? (p.comboStep + 1) % COMBO.length : 0;
+        p.comboTimer = P.comboWindow;
+        p.swing = COMBO[p.comboStep];
+      }
+      p.attackTimer = p.swing.time;
+      p.swingId += 1;
       p.attackHits.clear();
+      this.audio?.swing(!!p.swing.heavy);
     }
-    if (p.attackTimer > 0) {
-      const total = p.attackHeavy ? P.heavyTime : P.attackTime;
-      if (total - p.attackTimer > total * 0.32) this.#resolveSwing();
-      speed *= p.attackHeavy ? 0.35 : 0.72;
+    if (p.attackTimer > 0 && p.swing) {
+      const total = p.swing.time;
+      if (total - p.attackTimer > total * 0.3) this.#resolveSwing();
+      speed *= p.swing.heavy ? 0.35 : 0.72;
     }
 
     this.world.moveCircle(p, dx * speed * dt, dy * speed * dt);
 
+    // Footsteps, spaced by distance rather than time.
+    if (len > 0 && p.dashTimer <= 0 && p.attackTimer <= 0) {
+      p.footTimer -= dt * speed;
+      if (p.footTimer <= 0) {
+        p.footTimer = 34;
+        this.audio?.step(!p.inWater);
+        if (this.rng() < 0.5) {
+          this.effects.burst(p.x, p.y, 2, { colour: p.inWater ? '#7fc8ff' : '#6b6459', speed: 26, life: 0.3, size: 1.6, spread: 1.2, angle: Math.PI / 2 });
+        }
+      }
+    }
+
     // Animation
     const a = p.anim;
-    if (p.attackTimer > 0) {
-      const move = p.attackHeavy ? 'attack_2' : 'attack_1';
-      a.play(this.sprites.hero.find(move, p.facing) || this.sprites.hero.find('idle', p.facing), { restart: true });
+    if (p.attackTimer > 0 && p.swing) {
+      // restart only when the swing begins, or the clip would be pinned to frame 0
+      if (p.swingId !== a.swingId) {
+        a.play(this.sprites.hero.find(p.swing.move, p.facing) || this.sprites.hero.find('idle', p.facing), { restart: true });
+        a.swingId = p.swingId;
+      }
     } else if (len > 0) {
       a.play(this.sprites.hero.find('walk', p.facing) || this.sprites.hero.find('idle', p.facing));
     } else {
@@ -674,6 +788,7 @@ export class Game {
       this.effects.ring(p.x, p.y - 12, { colour: '#ff8fa8', grow: 150, radius: 8 });
       this.effects.burst(p.x, p.y - 12, 14, { colour: '#ff9fb4', speed: 100, life: 0.6, lift: 20 });
       this.effects.text(p.x, p.y - 26, `+${Math.round(healed)} HP`, '#ff9fb4');
+      this.audio?.potion();
     }
 
     // Interaction prompt
@@ -706,15 +821,17 @@ export class Game {
     }
     this.effects.ring(prop.x, prop.y - 8, { colour: '#ffd479', grow: 170, radius: 6 });
     this.effects.burst(prop.x, prop.y - 8, 18, { colour: '#ffd479', speed: 130, life: 0.7, lift: 40 });
+    this.audio?.chest();
     this.say(`Chest: ${taken.join(', ')}`, '#ffd479');
   }
 
   #resolveSwing() {
     const p = this.player;
-    const heavy = p.attackHeavy;
-    const reach = heavy ? P.heavyReach : P.attackReach;
-    const arc = heavy ? P.heavyArc : P.attackArc;
-    const damage = heavy ? p.damage * 2 : p.damage;
+    const beat = p.swing || COMBO[0];
+    const heavy = !!beat.heavy;
+    const reach = heavy ? beat.reach : P.attackReach * beat.reach;
+    const arc = heavy ? beat.arc : P.attackArc * beat.arc;
+    const damage = p.damage * beat.damage;
     const base = { S: Math.PI / 2, W: Math.PI, E: 0, N: -Math.PI / 2 }[p.facing];
 
     let hit = false;
@@ -744,6 +861,7 @@ export class Game {
       hit = true;
       if (prop.hp <= 0) {
         prop.dead = true;
+        this.audio?.smash();
         this.effects.burst(prop.x, prop.y - 12, 24, { colour: '#8a5a30', speed: 170, life: 0.7, lift: 40 });
         this.effects.ring(prop.x, prop.y - 12, { colour: '#c99a5a', grow: 150, radius: 8 });
         if (this.rng() < 0.55) this.pickups.push(new Pickup(prop.x, prop.y, 'souls', 15 + Math.floor(this.rng() * 25)));
@@ -754,8 +872,13 @@ export class Game {
       }
     }
 
-    if (hit) this.camera.kick(heavy ? 6 : 3);
-    else this.effects.swing(p.x, p.y - 14, base, arc, reach, heavy ? '#ffd479' : '#cfe0ff', 0.2, heavy ? 6 : 4);
+    if (hit) {
+      this.freeze = heavy ? 0.075 : 0.04;
+      this.camera.kick(heavy ? 6 : 3);
+      this.audio?.hit(heavy);
+    } else {
+      this.effects.swing(p.x, p.y - 14, base, arc, reach, heavy ? '#ffd479' : '#cfe0ff', 0.2, heavy ? 6 : 4);
+    }
   }
 
   #damageEnemy(enemy, amount, angle, heavy = false) {
@@ -784,8 +907,10 @@ export class Game {
         lift: 40,
       });
       this.effects.ring(enemy.x, enemy.y - enemy.radius, { colour: enemy.isBoss ? '#c08cff' : '#d9b98a', grow: 190, radius: 8 });
+      this.audio?.die(enemy.isBoss);
       if (this.rng() < 0.3) this.pickups.push(new Pickup(enemy.x, enemy.y - 12, 'souls', Math.round(enemy.def.souls / 2)));
       if (levelled) {
+        this.audio?.levelUp();
         this.say(`Level ${this.player.level}!`, '#a9d8ff');
         this.effects.ring(this.player.x, this.player.y - 14, { colour: '#a9d8ff', grow: 260, radius: 10, life: 0.6, width: 5 });
       }
@@ -813,6 +938,7 @@ export class Game {
       e.attackCd -= dt;
       e.attackAnim = Math.max(0, e.attackAnim - dt);
       e.castAnim = Math.max(0, e.castAnim - dt);
+      e.tellFlash = Math.max(0, (e.tellFlash || 0) - dt);
 
       if (e.summon > 0) {
         e.summon -= dt;
@@ -833,7 +959,7 @@ export class Game {
 
       let move = { x: 0, y: 0 };
       if (e.aggro) {
-        move = e.def.ranged ? this.#rangedBrain(e, p, dx, dy, dist) : this.#meleeBrain(e, p, dx, dy, dist);
+        move = e.def.ranged ? this.#rangedBrain(e, p, dx, dy, dist, dt) : this.#meleeBrain(e, p, dx, dy, dist, dt);
         e.facing = facingFromVector(dx, dy);
       } else {
         e.stateTimer -= dt;
@@ -887,58 +1013,81 @@ export class Game {
     e.anim.update(dt);
   }
 
-  #meleeBrain(e, p, dx, dy, dist) {
+  #meleeBrain(e, p, dx, dy, dist, dt) {
     const want = e.def.reach + p.radius + e.radius - 6;
     if (dist > want) {
       e.state = 'chase';
       return { x: dx / dist, y: dy / dist };
     }
     e.state = 'attack';
+
+    // Windup first, strike at the end of it: the tell is the fair warning.
+    if (e.windup > 0) {
+      e.windup -= dt;
+      if (e.windup <= 0) {
+        const angle = Math.atan2(dy, dx);
+        if (dist < e.radius + p.radius + 12 && p.hurt(e.def.damage, this.effects)) {
+          this.stats.damageTaken += e.def.damage;
+          this.camera.kick(7);
+          this.freeze = 0.05;
+          this.audio?.hurt();
+          this.effects.text(p.x, p.y - 26, `-${e.def.damage}`, '#ff7a7a');
+        }
+        this.audio?.flesh();
+        this.effects.burst(e.x + Math.cos(angle) * e.radius, e.y + Math.sin(angle) * e.radius - 8, 6, {
+          colour: '#d05a4a',
+          speed: 110,
+          life: 0.3,
+          spread: 1.4,
+          angle,
+        });
+      }
+      return { x: 0, y: 0 };
+    }
+
     if (e.attackCd <= 0) {
       e.attackCd = e.def.cooldown;
-      e.attackAnim = 0.36;
-      const angle = Math.atan2(dy, dx);
-      if (dist < e.radius + p.radius + 12 && p.hurt(e.def.damage, this.effects)) {
-        this.stats.damageTaken += e.def.damage;
-        this.camera.kick(7);
-        this.effects.text(p.x, p.y - 26, `-${e.def.damage}`, '#ff7a7a');
-      }
-      this.effects.burst(e.x + Math.cos(angle) * e.radius, e.y + Math.sin(angle) * e.radius - 8, 6, {
-        colour: '#d05a4a',
-        speed: 110,
-        life: 0.3,
-        spread: 1.4,
-        angle,
-      });
+      e.windup = ENEMY_WINDUP;
+      e.attackAnim = ENEMY_WINDUP + 0.2;
+      e.tellFlash = ENEMY_WINDUP;
     }
     // A little circling so melee enemies are not static.
     const side = Math.sin(this.time * 1.7 + e.id) * 0.35;
     return { x: (-dy / dist) * side, y: (dx / dist) * side };
   }
 
-  #rangedBrain(e, p, dx, dy, dist) {
+  #rangedBrain(e, p, dx, dy, dist, dt) {
     const want = e.def.range;
+    if (e.windup > 0) {
+      e.windup -= dt;
+      if (e.windup <= 0) {
+        const cast = e.kind === 'goblin_shaman';
+        const speed = e.def.ranged === 'arrow' ? 255 : 165;
+        const lead = e.def.ranged === 'arrow' ? 0.22 : 0.1;
+        const a = Math.atan2(p.y + p.vy * lead - e.y, p.x + p.vx * lead - e.x);
+        this.projectiles.push(
+          new Projectile(e.x + Math.cos(a) * (e.radius + 6), e.y + Math.sin(a) * (e.radius + 6) - 8, Math.cos(a) * speed, Math.sin(a) * speed, {
+            damage: e.def.damage,
+            kind: e.def.ranged,
+            life: 3,
+          }),
+        );
+        this.effects.burst(e.x + Math.cos(a) * e.radius, e.y + Math.sin(a) * e.radius - 8, 8, {
+          colour: cast ? '#b47bff' : '#e8d8a8',
+          speed: 120,
+          life: 0.3,
+          spread: 0.9,
+          angle: a,
+        });
+      }
+      return { x: 0, y: 0 };
+    }
+
     if (e.attackCd <= 0 && dist < want && this.world.lineOfSight(e.x, e.y, p.x, p.y)) {
       e.attackCd = e.def.cooldown;
-      const cast = e.kind === 'goblin_shaman';
-      e.castAnim = cast ? 0.5 : 0.34;
-      const speed = e.def.ranged === 'arrow' ? 255 : 165;
-      const lead = e.def.ranged === 'arrow' ? 0.22 : 0.1;
-      const a = Math.atan2(p.y + p.vy * lead - e.y, p.x + p.vx * lead - e.x);
-      this.projectiles.push(
-        new Projectile(e.x + Math.cos(a) * (e.radius + 6), e.y + Math.sin(a) * (e.radius + 6) - 8, Math.cos(a) * speed, Math.sin(a) * speed, {
-          damage: e.def.damage,
-          kind: e.def.ranged,
-          life: 3,
-        }),
-      );
-      this.effects.burst(e.x + Math.cos(a) * e.radius, e.y + Math.sin(a) * e.radius - 8, 8, {
-        colour: cast ? '#b47bff' : '#e8d8a8',
-        speed: 120,
-        life: 0.3,
-        spread: 0.9,
-        angle: a,
-      });
+      e.windup = ENEMY_WINDUP + 0.12;
+      e.castAnim = ENEMY_WINDUP + 0.22;
+      e.tellFlash = ENEMY_WINDUP;
     }
 
     if (dist > want * 0.78) return { x: dx / dist, y: dy / dist };
@@ -969,6 +1118,7 @@ export class Game {
           this.stats.damageTaken += pr.damage;
           this.camera.kick(5);
           this.effects.text(p.x, p.y - 26, `-${pr.damage}`, '#ff7a7a');
+          this.audio?.hurt();
         }
         pr.life = 0;
       }
@@ -992,9 +1142,11 @@ export class Game {
         it.taken = true;
         if (it.kind === 'souls') {
           p.addSouls(it.value);
+          this.audio?.souls();
           this.effects.text(it.x, it.y - 12, `+${it.value} souls`, '#a9d8ff');
         } else {
           p.hp = Math.min(p.maxHp, p.hp + 25);
+          this.audio?.pickup();
           this.effects.text(it.x, it.y - 12, '+25 HP', '#ff9fb4');
           this.effects.burst(it.x, it.y - 12, 10, { colour: '#ff9fb4', speed: 90, life: 0.5, lift: 20 });
         }
@@ -1023,6 +1175,9 @@ export class Game {
     this._lightCanvas = null;
   }
 
+  // Set to true to count canvas calls; used by perf.html.
+  stats = null;
+
   draw() {
     const ctx = this.ctx;
     const cam = this.camera;
@@ -1043,6 +1198,7 @@ export class Game {
     ctx.restore();
 
     this.#drawLighting(ctx);
+    this.#drawDanger(ctx);
   }
 
   #visibleBounds() {
@@ -1120,6 +1276,14 @@ export class Game {
     }
 
     this.#drawShadow(ctx, e, sprite, e.scale);
+    // The windup tell: the enemy flares just before its blow lands.
+    if (e.tellFlash > 0) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(0.8, e.tellFlash * 3.4);
+      ctx.globalCompositeOperation = 'lighter';
+      sprite.draw(ctx, e.anim.clip, e.x, e.y, e.scale);
+      ctx.restore();
+    }
     if (e.flash > 0) {
       ctx.save();
       ctx.globalAlpha = Math.min(1, e.flash * 5);
@@ -1155,6 +1319,16 @@ export class Game {
       return;
     }
 
+    // Dash afterimages.
+    for (const g of p.ghosts) {
+      const a = (g.life / g.maxLife) * 0.4;
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.globalCompositeOperation = 'lighter';
+      sprite.draw(ctx, p.anim.clip, g.x, g.y, 1);
+      ctx.restore();
+    }
+
     this.#drawShadow(ctx, p, sprite, 1);
     if (p.invuln > 0 && Math.floor(this.time * 24) % 2 === 0) ctx.globalAlpha = 0.5;
     sprite.draw(ctx, p.anim.clip, p.x, p.y, 1);
@@ -1170,6 +1344,23 @@ export class Game {
       ctx.fill();
       ctx.restore();
     }
+  }
+
+  // A pulsing red edge when you are nearly dead.
+  #drawDanger(ctx) {
+    const p = this.player;
+    if (!p || p.dead || p.hp / p.maxHp > 0.34) return;
+    const t = clamp((0.34 - p.hp / p.maxHp) / 0.34, 0, 1);
+    const pulse = 0.5 + Math.sin(this.time * (4 + t * 5)) * 0.5;
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.28, W / 2, H / 2, Math.max(W, H) * 0.62);
+    g.addColorStop(0, 'rgba(190,20,25,0)');
+    g.addColorStop(1, `rgba(190,20,25,${0.14 + t * 0.3 * pulse})`);
+    ctx.save();
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
   }
 
   // The generator already bakes a shadow into each frame; this adds the small
@@ -1278,12 +1469,29 @@ export class Game {
       this._lightCanvas.width = this.canvas.width;
       this._lightCanvas.height = this.canvas.height;
     }
+    // One pre-rendered radial glow, blitted per light. Building a fresh gradient
+    // for every torch on every frame is the single most expensive thing this
+    // renderer could do, and it is entirely avoidable.
+    if (!this._glow) {
+      const g = document.createElement('canvas');
+      g.width = g.height = 128;
+      const c = g.getContext('2d');
+      const grad = c.createRadialGradient(64, 64, 0, 64, 64, 64);
+      grad.addColorStop(0, 'rgba(0,0,0,1)');
+      grad.addColorStop(0.55, 'rgba(0,0,0,0.72)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = grad;
+      c.fillRect(0, 0, 128, 128);
+      this._glow = g;
+    }
+
     const lc = this._lightCanvas;
     const lctx = lc.getContext('2d');
     const W = lc.width;
     const H = lc.height;
 
     lctx.globalCompositeOperation = 'source-over';
+    lctx.globalAlpha = 1;
     lctx.fillStyle = 'rgba(4,3,9,0.90)';
     lctx.fillRect(0, 0, W, H);
     lctx.globalCompositeOperation = 'destination-out';
@@ -1292,14 +1500,8 @@ export class Game {
       const sx = x - this.camera.x;
       const sy = y - this.camera.y;
       if (sx < -r || sy < -r || sx > W + r || sy > H + r) return;
-      const g = lctx.createRadialGradient(sx, sy, 0, sx, sy, r);
-      g.addColorStop(0, `rgba(0,0,0,${strength})`);
-      g.addColorStop(0.55, `rgba(0,0,0,${strength * 0.72})`);
-      g.addColorStop(1, 'rgba(0,0,0,0)');
-      lctx.fillStyle = g;
-      lctx.beginPath();
-      lctx.arc(sx, sy, r, 0, TAU);
-      lctx.fill();
+      lctx.globalAlpha = strength;
+      lctx.drawImage(this._glow, sx - r, sy - r, r * 2, r * 2);
     };
 
     if (this.player && !this.player.dead) punch(this.player.x, this.player.y - 16, 172, 0.95);
@@ -1310,6 +1512,7 @@ export class Game {
       const flick = 0.92 + Math.sin(this.time * 7 + prop.phase) * 0.05 + Math.sin(this.time * 13.3 + prop.phase * 2) * 0.03;
       punch(prop.x, prop.y - 14, light.radius * flick, 0.92);
     }
+    lctx.globalAlpha = 1;
 
     ctx.drawImage(lc, 0, 0);
   }
