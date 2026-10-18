@@ -33,15 +33,30 @@ async function boot() {
 
   const sprites = {};
   const names = Object.keys(manifest);
+  const failed = [];
   let done = 0;
+
+  // One retry: a dropped request on a phone should not leave a permanent
+  // placeholder in the level.
+  const loadWithRetry = async (name) => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await loadSprite(`${SPRITE_DIR}/${name}`, name, manifest[name]);
+      } catch (err) {
+        if (attempt === 0) await new Promise((r) => setTimeout(r, 1200));
+        else {
+          console.warn(`[boot] ${name} failed to load (${err.message})`);
+          failed.push(name);
+          return placeholderSprite(name);
+        }
+      }
+    }
+    return placeholderSprite(name);
+  };
+
   await Promise.all(
     names.map(async (name) => {
-      try {
-        sprites[name] = await loadSprite(`${SPRITE_DIR}/${name}`, name, manifest[name]);
-      } catch (err) {
-        console.warn(`[boot] ${name} failed to load (${err.message}); using a placeholder`);
-        sprites[name] = placeholderSprite(name);
-      }
+      sprites[name] = await loadWithRetry(name);
       done++;
       setStatus(`loading sprites… ${done}/${names.length}`);
     }),
@@ -80,6 +95,12 @@ async function boot() {
   resize();
 
   if (flags.has('autostart')) game.reset();
+
+  if (failed.length) {
+    const note = `${failed.length} sprite(s) failed to load: ${failed.join(', ')}`;
+    console.warn('[boot] ' + note);
+    game.say(note + ' — reload the page to retry.', '#e08a6a');
+  }
 
   let last = performance.now();
   function frame(now) {
