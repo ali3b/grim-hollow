@@ -1,0 +1,14 @@
+# Editors / OS
+.DS_Store
+Thumbs.db
+*.swp
+
+# Node (there is no build step, but editors like to make one)
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+
+# The Synty Sprite Generator writes its own export here when syncing.
+# tools/sync_assets.py copies the parts we ship into assets/sprites/.

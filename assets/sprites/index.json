@@ -1,0 +1,672 @@
+{
+ "arrow": {
+  "base": "Arrow_01.json",
+  "layers": null,
+  "parts": [],
+  "frameWidth": 34,
+  "frameHeight": 28,
+  "pivot": {
+   "x": 17,
+   "y": 14
+  },
+  "clips": [
+   "projectile"
+  ],
+  "anims": [
+   "projectile_E",
+   "projectile_N",
+   "projectile_S",
+   "projectile_W"
+  ],
+  "directions": [
+   "S",
+   "W",
+   "N",
+   "E"
+  ]
+ },
+ "barrel": {
+  "base": "Prop_Barrel_01.json",
+  "layers": null,
+  "parts": [],
+  "frameWidth": 30,
+  "frameHeight": 46,
+  "pivot": {
+   "x": 15,
+   "y": 35
+  },
+  "clips": [
+   "damaged",
+   "intact"
+  ],
+  "anims": [
+   "damaged_S",
+   "intact_S"
+  ],
+  "directions": [
+   "S"
+  ]
+ },
+ "bones": {
+  "base": "Prop_Skeleton_01.json",
+  "layers": null,
+  "parts": [],
+  "frameWidth": 66,
+  "frameHeight": 56,
+  "pivot": {
+   "x": 33.02,
+   "y": 32
+  },
+  "clips": [
+   "idle"
+  ],
+  "anims": [
+   "idle_S"
+  ],
+  "directions": [
+   "S"
+  ]
+ },
+ "brazier": {
+  "base": "Prop_Brazier_01.json",
+  "layers": null,
+  "parts": [],
+  "frameWidth": 30,
+  "frameHeight": 44,
+  "pivot": {
+   "x": 15,
+   "y": 32
+  },
+  "clips": [
+   "idle"
+  ],
+  "anims": [
+   "idle_S"
+  ],
+  "directions": [
+   "S"
+  ]
+ },
+ "chest": {
+  "base": "Prop_Chest_01.json",
+  "layers": null,
+  "parts": [],
+  "frameWidth": 32,
+  "frameHeight": 38,
+  "pivot": {
+   "x": 16,
+   "y": 26
+  },
+  "clips": [
+   "idle"
+  ],
+  "anims": [
+   "idle_S"
+  ],
+  "directions": [
+   "S"
+  ]
+ },
+ "crate": {
+  "base": "Prop_Crate_01.json",
+  "layers": null,
+  "parts": [],
+  "frameWidth": 40,
+  "frameHeight": 48,
+  "pivot": {
+   "x": 20,
+   "y": 33
+  },
+  "clips": [
+   "idle"
+  ],
+  "anims": [
+   "idle_S"
+  ],
+  "directions": [
+   "S"
+  ]
+ },
+ "darklord": {
+  "base": "Chr_DarkLord_Male_01.json",
+  "layers": "Chr_DarkLord_Male_01.layers.json",
+  "parts": [
+   {
+    "layer": "weapon",
+    "json": "Chr_DarkLord_Male_01_weapon.json"
+   }
+  ],
+  "frameWidth": 92,
+  "frameHeight": 124,
+  "pivot": {
+   "x": 46,
+   "y": 86
+  },
+  "clips": [
+   "staff_death",
+   "staff_hit",
+   "staff_idle",
+   "staff_run",
+   "staff_walk",
+   "sword_attack_1",
+   "sword_attack_2",
+   "sword_block",
+   "sword_death",
+   "sword_hit",
+   "sword_idle",
+   "sword_run",
+   "sword_walk"
+  ],
+  "anims": [
+   "staff_death_E",
+   "staff_death_N",
+   "staff_death_S",
+   "staff_death_W",
+   "staff_hit_E",
+   "staff_hit_N",
+   "staff_hit_S",
+   "staff_hit_W",
+   "staff_idle_E",
+   "staff_idle_N",
+   "staff_idle_S",
+   "staff_idle_W",
+   "staff_run_E",
+   "staff_run_N",
+   "staff_run_S",
+   "staff_run_W",
+   "staff_walk_E",
+   "staff_walk_N",
+   "staff_walk_S",
+   "staff_walk_W",
+   "sword_attack_1_E",
+   "sword_attack_1_N",
+   "sword_attack_1_S",
+   "sword_attack_1_W",
+   "sword_attack_2_E",
+   "sword_attack_2_N",
+   "sword_attack_2_S",
+   "sword_attack_2_W",
+   "sword_block_E",
+   "sword_block_N",
+   "sword_block_S",
+   "sword_block_W",
+   "sword_death_E",
+   "sword_death_N",
+   "sword_death_S",
+   "sword_death_W",
+   "sword_hit_E",
+   "sword_hit_N",
+   "sword_hit_S",
+   "sword_hit_W",
+   "sword_idle_E",
+   "sword_idle_N",
+   "sword_idle_S",
+   "sword_idle_W",
+   "sword_run_E",
+   "sword_run_N",
+   "sword_run_S",
+   "sword_run_W",
+   "sword_walk_E",
+   "sword_walk_N",
+   "sword_walk_S",
+   "sword_walk_W"
+  ],
+  "directions": [
+   "S",
+   "W",
+   "N",
+   "E"
+  ]
+ },
+ "demon": {
+  "base": "Chr_Demon_01.json",
+  "layers": "Chr_Demon_01.layers.json",
+  "parts": [
+   {
+    "layer": "weapon",
+    "json": "Chr_Demon_01_weapon.json"
+   }
+  ],
+  "frameWidth": 136,
+  "frameHeight": 174,
+  "pivot": {
+   "x": 68,
+   "y": 115
+  },
+  "clips": [
+   "sword_attack_1",
+   "sword_attack_2",
+   "sword_block",
+   "sword_death",
+   "sword_hit",
+   "sword_idle",
+   "sword_run",
+   "sword_walk"
+  ],
+  "anims": [
+   "sword_attack_1_E",
+   "sword_attack_1_N",
+   "sword_attack_1_S",
+   "sword_attack_1_W",
+   "sword_attack_2_E",
+   "sword_attack_2_N",
+   "sword_attack_2_S",
+   "sword_attack_2_W",
+   "sword_block_E",
+   "sword_block_N",
+   "sword_block_S",
+   "sword_block_W",
+   "sword_death_E",
+   "sword_death_N",
+   "sword_death_S",
+   "sword_death_W",
+   "sword_hit_E",
+   "sword_hit_N",
+   "sword_hit_S",
+   "sword_hit_W",
+   "sword_idle_E",
+   "sword_idle_N",
+   "sword_idle_S",
+   "sword_idle_W",
+   "sword_run_E",
+   "sword_run_N",
+   "sword_run_S",
+   "sword_run_W",
+   "sword_walk_E",
+   "sword_walk_N",
+   "sword_walk_S",
+   "sword_walk_W"
+  ],
+  "directions": [
+   "S",
+   "W",
+   "N",
+   "E"
+  ]
+ },
+ "goblin_brute": {
+  "base": "Chr_Goblin_Male.json",
+  "layers": "Chr_Goblin_Male.layers.json",
+  "parts": [
+   {
+    "layer": "weapon",
+    "json": "Chr_Goblin_Male_weapon.json"
+   }
+  ],
+  "frameWidth": 90,
+  "frameHeight": 120,
+  "pivot": {
+   "x": 45,
+   "y": 84
+  },
+  "clips": [
+   "sword_attack_1",
+   "sword_attack_2",
+   "sword_block",
+   "sword_death",
+   "sword_hit",
+   "sword_idle",
+   "sword_run",
+   "sword_walk"
+  ],
+  "anims": [
+   "sword_attack_1_E",
+   "sword_attack_1_N",
+   "sword_attack_1_S",
+   "sword_attack_1_W",
+   "sword_attack_2_E",
+   "sword_attack_2_N",
+   "sword_attack_2_S",
+   "sword_attack_2_W",
+   "sword_block_E",
+   "sword_block_N",
+   "sword_block_S",
+   "sword_block_W",
+   "sword_death_E",
+   "sword_death_N",
+   "sword_death_S",
+   "sword_death_W",
+   "sword_hit_E",
+   "sword_hit_N",
+   "sword_hit_S",
+   "sword_hit_W",
+   "sword_idle_E",
+   "sword_idle_N",
+   "sword_idle_S",
+   "sword_idle_W",
+   "sword_run_E",
+   "sword_run_N",
+   "sword_run_S",
+   "sword_run_W",
+   "sword_walk_E",
+   "sword_walk_N",
+   "sword_walk_S",
+   "sword_walk_W"
+  ],
+  "directions": [
+   "S",
+   "W",
+   "N",
+   "E"
+  ]
+ },
+ "goblin_shaman": {
+  "base": "Chr_Goblin_Shaman.json",
+  "layers": "Chr_Goblin_Shaman.layers.json",
+  "parts": [
+   {
+    "layer": "weapon",
+    "json": "Chr_Goblin_Shaman_weapon.json"
+   }
+  ],
+  "frameWidth": 96,
+  "frameHeight": 136,
+  "pivot": {
+   "x": 48,
+   "y": 83
+  },
+  "clips": [
+   "staff_death",
+   "staff_hit",
+   "staff_idle",
+   "staff_run",
+   "staff_walk"
+  ],
+  "anims": [
+   "staff_death_E",
+   "staff_death_N",
+   "staff_death_S",
+   "staff_death_W",
+   "staff_hit_E",
+   "staff_hit_N",
+   "staff_hit_S",
+   "staff_hit_W",
+   "staff_idle_E",
+   "staff_idle_N",
+   "staff_idle_S",
+   "staff_idle_W",
+   "staff_run_E",
+   "staff_run_N",
+   "staff_run_S",
+   "staff_run_W",
+   "staff_walk_E",
+   "staff_walk_N",
+   "staff_walk_S",
+   "staff_walk_W"
+  ],
+  "directions": [
+   "S",
+   "W",
+   "N",
+   "E"
+  ]
+ },
+ "hero": {
+  "base": "Character_Male_Baird.json",
+  "layers": "Character_Male_Baird.layers.json",
+  "parts": [
+   {
+    "layer": "offhand",
+    "json": "Character_Male_Baird_offhand.json"
+   },
+   {
+    "layer": "weapon",
+    "json": "Character_Male_Baird_weapon.json"
+   }
+  ],
+  "frameWidth": 120,
+  "frameHeight": 158,
+  "pivot": {
+   "x": 60,
+   "y": 106
+  },
+  "clips": [
+   "sword_attack_1",
+   "sword_attack_2",
+   "sword_block",
+   "sword_death",
+   "sword_hit",
+   "sword_idle",
+   "sword_run",
+   "sword_walk"
+  ],
+  "anims": [
+   "sword_attack_1_E",
+   "sword_attack_1_N",
+   "sword_attack_1_S",
+   "sword_attack_1_W",
+   "sword_attack_2_E",
+   "sword_attack_2_N",
+   "sword_attack_2_S",
+   "sword_attack_2_W",
+   "sword_block_E",
+   "sword_block_N",
+   "sword_block_S",
+   "sword_block_W",
+   "sword_death_E",
+   "sword_death_N",
+   "sword_death_S",
+   "sword_death_W",
+   "sword_hit_E",
+   "sword_hit_N",
+   "sword_hit_S",
+   "sword_hit_W",
+   "sword_idle_E",
+   "sword_idle_N",
+   "sword_idle_S",
+   "sword_idle_W",
+   "sword_run_E",
+   "sword_run_N",
+   "sword_run_S",
+   "sword_run_W",
+   "sword_walk_E",
+   "sword_walk_N",
+   "sword_walk_S",
+   "sword_walk_W"
+  ],
+  "directions": [
+   "S",
+   "W",
+   "N",
+   "E"
+  ]
+ },
+ "pillar": {
+  "base": "Bld_Pillar_01.json",
+  "layers": null,
+  "parts": [],
+  "frameWidth": 28,
+  "frameHeight": 90,
+  "pivot": {
+   "x": 14,
+   "y": 79
+  },
+  "clips": [
+   "idle"
+  ],
+  "anims": [
+   "idle_S"
+  ],
+  "directions": [
+   "S"
+  ]
+ },
+ "rune_orb": {
+  "base": "Rune_Symbol_01.json",
+  "layers": null,
+  "parts": [],
+  "frameWidth": 38,
+  "frameHeight": 42,
+  "pivot": {
+   "x": 19,
+   "y": 21
+  },
+  "clips": [
+   "pulse",
+   "spin"
+  ],
+  "anims": [
+   "pulse_E",
+   "pulse_N",
+   "pulse_S",
+   "pulse_W",
+   "spin_E",
+   "spin_N",
+   "spin_S",
+   "spin_W"
+  ],
+  "directions": [
+   "S",
+   "W",
+   "N",
+   "E"
+  ]
+ },
+ "skeleton_knight": {
+  "base": "Chr_Skeleton_LightArmor_01.json",
+  "layers": "Chr_Skeleton_LightArmor_01.layers.json",
+  "parts": [
+   {
+    "layer": "weapon",
+    "json": "Chr_Skeleton_LightArmor_01_weapon.json"
+   }
+  ],
+  "frameWidth": 120,
+  "frameHeight": 156,
+  "pivot": {
+   "x": 60,
+   "y": 106
+  },
+  "clips": [
+   "sword_attack_1",
+   "sword_attack_2",
+   "sword_block",
+   "sword_death",
+   "sword_hit",
+   "sword_idle",
+   "sword_run",
+   "sword_walk"
+  ],
+  "anims": [
+   "sword_attack_1_E",
+   "sword_attack_1_N",
+   "sword_attack_1_S",
+   "sword_attack_1_W",
+   "sword_attack_2_E",
+   "sword_attack_2_N",
+   "sword_attack_2_S",
+   "sword_attack_2_W",
+   "sword_block_E",
+   "sword_block_N",
+   "sword_block_S",
+   "sword_block_W",
+   "sword_death_E",
+   "sword_death_N",
+   "sword_death_S",
+   "sword_death_W",
+   "sword_hit_E",
+   "sword_hit_N",
+   "sword_hit_S",
+   "sword_hit_W",
+   "sword_idle_E",
+   "sword_idle_N",
+   "sword_idle_S",
+   "sword_idle_W",
+   "sword_run_E",
+   "sword_run_N",
+   "sword_run_S",
+   "sword_run_W",
+   "sword_walk_E",
+   "sword_walk_N",
+   "sword_walk_S",
+   "sword_walk_W"
+  ],
+  "directions": [
+   "S",
+   "W",
+   "N",
+   "E"
+  ]
+ },
+ "skeleton_ranger": {
+  "base": "Chr_Skeleton_Ranger_01.json",
+  "layers": "Chr_Skeleton_Ranger_01.layers.json",
+  "parts": [
+   {
+    "layer": "weapon",
+    "json": "Chr_Skeleton_Ranger_01_weapon.json"
+   }
+  ],
+  "frameWidth": 96,
+  "frameHeight": 150,
+  "pivot": {
+   "x": 48,
+   "y": 94
+  },
+  "clips": [
+   "bow_death",
+   "bow_draw",
+   "bow_hit",
+   "bow_idle",
+   "bow_run",
+   "bow_shoot",
+   "bow_walk"
+  ],
+  "anims": [
+   "bow_death_E",
+   "bow_death_N",
+   "bow_death_S",
+   "bow_death_W",
+   "bow_draw_E",
+   "bow_draw_N",
+   "bow_draw_S",
+   "bow_draw_W",
+   "bow_hit_E",
+   "bow_hit_N",
+   "bow_hit_S",
+   "bow_hit_W",
+   "bow_idle_E",
+   "bow_idle_N",
+   "bow_idle_S",
+   "bow_idle_W",
+   "bow_run_E",
+   "bow_run_N",
+   "bow_run_S",
+   "bow_run_W",
+   "bow_shoot_E",
+   "bow_shoot_N",
+   "bow_shoot_S",
+   "bow_shoot_W",
+   "bow_walk_E",
+   "bow_walk_N",
+   "bow_walk_S",
+   "bow_walk_W"
+  ],
+  "directions": [
+   "S",
+   "W",
+   "N",
+   "E"
+  ]
+ },
+ "torch": {
+  "base": "Prop_Torch_Ornate_01.json",
+  "layers": null,
+  "parts": [],
+  "frameWidth": 16,
+  "frameHeight": 28,
+  "pivot": {
+   "x": 8,
+   "y": 13
+  },
+  "clips": [
+   "idle"
+  ],
+  "anims": [
+   "idle_S"
+  ],
+  "directions": [
+   "S"
+  ]
+ }
+}

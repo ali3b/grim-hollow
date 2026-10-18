@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#06040a" />
+    <meta name="description" content="Grim Hollow — a top-down pixel-art dungeon arena-survivor." />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Grim Hollow" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icon-512.png" />
+    <link rel="icon" href="icon-192.png" />
+    <title>Grim Hollow</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        -webkit-tap-highlight-color: transparent;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #06040a;
+        color: #cbb994;
+        font-family: "Courier New", ui-monospace, monospace;
+        overscroll-behavior: none;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      #wrap {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+      }
+      canvas {
+        display: block;
+        image-rendering: pixelated;
+        box-shadow: 0 0 60px rgba(90, 60, 140, 0.25);
+        cursor: crosshair;
+      }
+      body.touch canvas {
+        cursor: none;
+      }
+
+      /* --- status / crash ------------------------------------------------ */
+      #status {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        text-align: center;
+        font-size: 13px;
+        line-height: 1.7;
+        padding: 2rem;
+        z-index: 5;
+      }
+      #status code {
+        background: #17121f;
+        padding: 0.2em 0.5em;
+        border: 1px solid #3b2f4d;
+      }
+      body.ready #status {
+        display: none;
+      }
+      #crash {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 20;
+        margin: 0;
+        padding: 0.7rem 1rem;
+        background: #3a0d12;
+        border-top: 2px solid #e0574a;
+        color: #ffd9d2;
+        font-size: 12px;
+        white-space: pre-wrap;
+        max-height: 40vh;
+        overflow: auto;
+      }
+
+      /* --- touch controls ------------------------------------------------ */
+      #touch {
+        position: fixed;
+        inset: 0;
+        z-index: 4;
+        display: none;
+        pointer-events: none;
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+      body.touch.ready #touch {
+        display: block;
+      }
+      .touch-zone {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 46%;
+        pointer-events: auto;
+        touch-action: none;
+      }
+      .touch-stick {
+        position: absolute;
+        width: 0;
+        height: 0;
+        pointer-events: none;
+      }
+      .touch-stick-base,
+      .touch-stick-knob {
+        position: absolute;
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        left: 0;
+        top: 0;
+      }
+      .touch-stick-base {
+        width: 124px;
+        height: 124px;
+        margin: -62px 0 0 -62px;
+        border: 2px solid rgba(190, 170, 220, 0.35);
+        background: rgba(20, 14, 30, 0.28);
+      }
+      .touch-stick-knob {
+        width: 54px;
+        height: 54px;
+        margin: -27px 0 0 -27px;
+        background: rgba(203, 185, 148, 0.55);
+        border: 2px solid rgba(240, 226, 190, 0.7);
+      }
+      .touch-buttons {
+        position: absolute;
+        right: calc(14px + env(safe-area-inset-right));
+        bottom: calc(18px + env(safe-area-inset-bottom));
+        width: 210px;
+        height: 210px;
+        pointer-events: none;
+      }
+      .touch-btn {
+        position: absolute;
+        border-radius: 50%;
+        border: 2px solid rgba(190, 170, 220, 0.45);
+        background: rgba(24, 17, 36, 0.55);
+        color: #e8dcc4;
+        font: 700 11px/1 "Courier New", monospace;
+        letter-spacing: 0.04em;
+        pointer-events: auto;
+        touch-action: none;
+        backdrop-filter: blur(2px);
+      }
+      .touch-btn.big {
+        width: 92px;
+        height: 92px;
+        right: 6px;
+        bottom: 74px;
+        font-size: 13px;
+        border-color: rgba(255, 190, 120, 0.6);
+        background: rgba(70, 36, 24, 0.55);
+      }
+      .touch-btn.mid {
+        width: 66px;
+        height: 66px;
+      }
+      .touch-btn.small {
+        width: 54px;
+        height: 54px;
+        font-size: 10px;
+      }
+      .touch-btn.down {
+        background: rgba(203, 185, 148, 0.4);
+        border-color: rgba(255, 235, 200, 0.9);
+      }
+      .touch-btn[data-action="heavy"] {
+        right: 96px;
+        bottom: 24px;
+      }
+      .touch-btn[data-action="dash"] {
+        right: 24px;
+        bottom: 6px;
+      }
+      .touch-btn[data-action="potion"] {
+        right: 104px;
+        bottom: 104px;
+      }
+      .touch-btn[data-action="interact"] {
+        right: 170px;
+        bottom: 60px;
+      }
+      .touch-btn.corner {
+        position: fixed;
+        left: calc(14px + env(safe-area-inset-left));
+        top: calc(14px + env(safe-area-inset-top));
+        width: 48px;
+        height: 48px;
+      }
+      .touch-hint {
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        bottom: calc(16px + env(safe-area-inset-bottom));
+        background: rgba(9, 7, 14, 0.8);
+        border: 1px solid rgba(150, 130, 190, 0.3);
+        padding: 6px 12px;
+        font-size: 11px;
+        color: #b6a9c8;
+        white-space: nowrap;
+        transition: opacity 0.8s;
+        pointer-events: none;
+      }
+      .touch-hint.fade {
+        opacity: 0;
+      }
+
+      /* Portrait phones: nudge, but keep playing. */
+      #rotate {
+        position: fixed;
+        left: 0;
+        right: 0;
+        top: 0;
+        z-index: 6;
+        display: none;
+        padding: calc(5px + env(safe-area-inset-top)) 12px 5px;
+        background: rgba(9, 7, 14, 0.9);
+        border-bottom: 1px solid rgba(150, 130, 190, 0.3);
+        color: #b6a9c8;
+        font-size: 11px;
+        text-align: center;
+        pointer-events: none;
+      }
+      body.touch.ready #rotate {
+        display: block;
+      }
+      @media (orientation: landscape) {
+        #rotate {
+          display: none !important;
+        }
+      }
+      /* Narrow: the minimap is gone, so MAP can live in the top right. */
+      @media (max-width: 780px) {
+        .touch-btn.corner {
+          left: auto;
+          right: calc(10px + env(safe-area-inset-right));
+          top: calc(34px + env(safe-area-inset-top));
+          width: 46px;
+          height: 46px;
+        }
+        .touch-hint {
+          display: none;
+        }
+      }
+      /* Tablets get slightly larger targets than a phone. */
+      @media (min-width: 700px) {
+        .touch-btn.big {
+          width: 108px;
+          height: 108px;
+        }
+        .touch-btn.mid {
+          width: 78px;
+          height: 78px;
+          font-size: 12px;
+        }
+        .touch-btn.small {
+          width: 62px;
+          height: 62px;
+        }
+        .touch-buttons {
+          width: 250px;
+          height: 250px;
+        }
+        .touch-btn.corner {
+          width: 56px;
+          height: 56px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="wrap"><canvas id="game" width="960" height="600"></canvas></div>
+    <div id="status">starting…</div>
+    <div id="touch"></div>
+    <div id="rotate">Rotate your device for a bigger view.</div>
+    <script>
+      // Surface runtime errors instead of leaving a black canvas.
+      const crash = (what) => {
+        let el = document.getElementById('crash');
+        if (!el) {
+          el = document.createElement('pre');
+          el.id = 'crash';
+          document.body.appendChild(el);
+        }
+        el.textContent += what + '\n';
+        document.title = 'CRASH';
+      };
+      window.addEventListener('error', (e) => crash(`${e.message}\n  ${e.filename}:${e.lineno}`));
+      window.addEventListener('unhandledrejection', (e) => crash(`unhandled rejection: ${e.reason}`));
+    </script>
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>

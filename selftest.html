@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+  <head><meta charset="utf-8" /><title>selftest</title></head>
+  <body style="background:#0a0810;color:#cfc6da;font:12px monospace">
+    <canvas id="game" width="480" height="300" style="border:1px solid #333"></canvas>
+    <pre id="out">running…</pre>
+    <script type="module">
+      import { loadTileset, loadMap, loadSprite, loadJSON, placeholderSprite } from './src/assets.js';
+      import { Game, World } from './src/game.js';
+      import { Input } from './src/input.js';
+
+      const out = document.getElementById('out');
+      const log = [];
+      const say = (s) => log.push(s);
+      const errs = [];
+      window.addEventListener('error', (e) => errs.push(e.message));
+
+      const tileset = await loadTileset('assets/tilesets/hollow_floor', 'hollow_floor');
+      const map = await loadTileset && (await loadMap('assets/maps/hollow_deep', tileset));
+      const manifest = await loadJSON('assets/sprites/index.json');
+      const sprites = {};
+      for (const name of Object.keys(manifest)) {
+        try {
+          sprites[name] = await loadSprite('assets/sprites/' + name, name, manifest[name]);
+        } catch (e) {
+          say('LOAD FAIL ' + name + ': ' + e.message);
+          sprites[name] = placeholderSprite(name);
+        }
+      }
+
+      const canvas = document.getElementById('game');
+      const world = new World(map, tileset, sprites);
+      const input = new Input(canvas);
+      const game = new Game(canvas, world, input);
+      game.reset();
+
+      // A fake player: walk to each patrol zone, fight everything, then the boss.
+      const DT = 1 / 60;
+      let frames = 0;
+      const step = (axis, actions = []) => {
+        input.axis.x = axis[0];
+        input.axis.y = axis[1];
+        input.pressed = new Set(actions);
+        game.update(DT);
+        game.draw();
+        input.pressed.clear();
+        frames++;
+      };
+
+      const enemies = () => game.entities.filter((e) => e.kind && e.hp > 0);
+      const alive = () => enemies().length;
+
+      say('start: player ' + Math.round(game.player.x) + ',' + Math.round(game.player.y) + ' state=' + game.state);
+
+      // Teleport-assisted tour: drop into each room, fight, and report.
+      const route = game.world.zones.filter((z) => z.kind === 'patrol' || z.kind === 'boss');
+      for (const z of route) {
+        const c = world.centreOfRect(z.rect);
+        game.player.x = c.x;
+        game.player.y = c.y;
+        game.player.hp = game.player.maxHp;
+        step([0, 0]);
+        const spawned = alive();
+        // 12 seconds of "hold attack and swing at whatever is nearest".
+        let t = 0;
+        while (t < 12 && alive() > 0 && game.state === 'play') {
+          let best = null;
+          let bd = 1e9;
+          for (const e of enemies()) {
+            const d = Math.hypot(e.x - game.player.x, e.y - game.player.y);
+            if (d < bd) {
+              bd = d;
+              best = e;
+            }
+          }
+          if (!best) break;
+          const a = Math.atan2(best.y - game.player.y, best.x - game.player.x);
+          step([Math.cos(a), Math.sin(a)], frames % 20 === 0 ? ['attack'] : []);
+          t += DT;
+        }
+        say(
+          z.kind.padEnd(5) + z.name.padEnd(20) +
+          ' spawned=' + String(spawned).padStart(2) +
+          ' left=' + String(alive()).padStart(2) +
+          ' kills=' + String(game.stats.kills).padStart(2) +
+          ' lvl=' + game.player.level +
+          ' souls=' + game.player.souls +
+          ' hp=' + Math.round(game.player.hp) +
+          ' propsBroken=' + world.props.filter((p) => p.dead).length,
+        );
+        game.player.hp = game.player.maxHp;
+      }
+
+      // Back to the stairwell to finish.
+      if (game.exitOpen && game.extraction) {
+        const e = world.centreOfRect(game.extraction.rect);
+        game.player.x = e.x;
+        game.player.y = e.y;
+        step([0, 0]);
+      }
+      say('bossSpawned=' + game.bossSpawned + ' bossDead=' + game.bossDead + ' exitOpen=' + game.exitOpen);
+      say('final state=' + game.state + ' kills=' + game.stats.kills + ' frames=' + frames);
+      say('runtime errors: ' + (errs.length ? errs.join(' | ') : 'none'));
+      out.textContent = log.join('\n');
+    </script>
+  </body>
+</html>
