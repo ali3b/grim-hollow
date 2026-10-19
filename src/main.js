@@ -133,6 +133,12 @@ async function boot() {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
 
+    // R restarts a run, which the pause menu and the death card both promise.
+    if (input.consume('restart') && game.state !== 'title') {
+      game.reset();
+      game.audio?.setTension(0);
+    }
+
     if (input.consume('pause')) {
       if (game.state === 'play') {
         ui.togglePause();
@@ -175,7 +181,7 @@ async function boot() {
       game.audio?.resume();
       game.audio?.setMusic(true);
     }
-    if ((game.state === 'won' || game.state === 'lost') && (game.bossDead || (game.player && game.player.deathTimer > 1.6)) && confirm()) {
+    if ((game.state === 'won' || game.state === 'lost') && (game.bossDead || (game.player && game.player.deathTimer > 1.2)) && confirm()) {
       game.reset();
     }
     if (input.consume('map')) ui.toggleMap();

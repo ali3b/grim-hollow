@@ -448,6 +448,10 @@ export class Player extends Body {
     this.whirlwind = false;
     this.shockwave = false;
     this.taken = [];
+    this.kx = 0;
+    this.ky = 0;
+    this.hurtFrom = 0;
+    this.hurtFromTimer = 0;
   }
 
   countOf(id) {
@@ -476,12 +480,21 @@ export class Player extends Body {
     return SOULS_PER_LEVEL[this.level] ?? SOULS_PER_LEVEL[SOULS_PER_LEVEL.length - 1];
   }
 
-  hurt(amount, effects) {
+  hurt(amount, effects, from = null) {
     if (this.invuln > 0 || this.dead) return false;
     this.hp -= amount;
     this.invuln = P.invulnAfterHit;
     this.hurtFlash = 0.32;
     effects.burst(this.x, this.y - 14, 8, { colour: '#c4342b', speed: 120, life: 0.4 });
+    // Getting hit should move you and tell you where from - the player got a
+    // fifth of the feedback enemies did until now.
+    if (from) {
+      const a = Math.atan2(this.y - from.y, this.x - from.x);
+      this.kx = Math.cos(a) * 210;
+      this.ky = Math.sin(a) * 210;
+      this.hurtFrom = a;
+      this.hurtFromTimer = 0.6;
+    }
     if (this.hp <= 0) {
       this.hp = 0;
       this.dead = true;
@@ -654,7 +667,13 @@ export class Game {
     this.messages = this.messages.filter((m) => m.life > 0);
 
     if (this.state !== 'play') {
-      if (this.state === 'won' || this.state === 'lost') this.effects.update(dt);
+      if (this.state === 'won' || this.state === 'lost') {
+        // The loss card waits on deathTimer, and update() used to stop ticking
+        // it the moment the state flipped - so it froze just under the
+        // threshold the restart key is gated on and you could not restart.
+        this.player.deathTimer += dt;
+        this.effects.update(dt);
+      }
       return;
     }
 
@@ -838,7 +857,7 @@ export class Game {
       if (e.windup <= 0) {
         const angle = Math.atan2(dy, dx);
         const dmg = e.def.damage * (enraged ? 1.25 : 1);
-        if (dist < e.radius + p.radius + 12 && p.hurt(dmg, this.effects)) {
+        if (dist < e.radius + p.radius + 12 && this.world.lineOfSight(e.x, e.y, p.x, p.y) && p.hurt(dmg, this.effects, e)) {
           this.stats.damageTaken += dmg;
           this.camera.kick(9);
           this.freeze = 0.05;
@@ -997,6 +1016,18 @@ export class Game {
       speed *= p.swing.heavy ? 0.35 : 0.72;
     }
 
+    if (p.kx || p.ky) {
+      this.world.moveCircle(p, p.kx * dt, p.ky * dt);
+      const damp = Math.exp(-11 * dt);
+      p.kx *= damp;
+      p.ky *= damp;
+      if (Math.abs(p.kx) < 2 && Math.abs(p.ky) < 2) {
+        p.kx = 0;
+        p.ky = 0;
+      }
+    }
+    p.hurtFromTimer = Math.max(0, p.hurtFromTimer - dt);
+
     this.world.moveCircle(p, dx * speed * dt, dy * speed * dt);
 
     // Footsteps, spaced by distance rather than time.
@@ -1091,6 +1122,7 @@ export class Game {
       const a = Math.atan2(e.y - p.y, e.x - p.x);
       const diff = Math.abs(((a - base + Math.PI * 3) % TAU) - Math.PI);
       if (diff > arc / 2) continue;
+      if (!this.world.lineOfSight(p.x, p.y, e.x, e.y)) continue;
       p.attackHits.add(e.id);
       this.#damageEnemy(e, damage, a, heavy, crit);
       hit = true;
@@ -1104,6 +1136,7 @@ export class Game {
       const a = Math.atan2(prop.y - p.y, prop.x - p.x);
       const diff = Math.abs(((a - base + Math.PI * 3) % TAU) - Math.PI);
       if (diff > arc / 2) continue;
+      if (!this.world.lineOfSight(p.x, p.y, prop.x, prop.y)) continue;
       p.attackProps.add(prop);
       prop.hp -= heavy ? damage * 2 : damage;
       prop.flash = 0.12;
@@ -1121,12 +1154,23 @@ export class Game {
       }
     }
 
+    // The blade trail draws either way. It used to be the miss branch only, so
+    // connecting with something produced no arc at all - exactly backwards.
+    this.effects.swing(
+      p.x,
+      p.y - 14,
+      base,
+      arc,
+      reach,
+      hit ? (heavy ? '#ffe9c0' : '#ffd0a8') : heavy ? '#c8a0ff' : '#cfe0ff',
+      hit ? 0.26 : 0.2,
+      heavy ? 7 : hit ? 6 : 4,
+    );
+
     if (hit) {
       this.freeze = heavy ? 0.075 : 0.04;
       this.camera.kick(heavy ? 6 : 3);
       this.audio?.hit(heavy);
-    } else {
-      this.effects.swing(p.x, p.y - 14, base, arc, reach, heavy ? '#ffd479' : '#cfe0ff', 0.2, heavy ? 6 : 4);
     }
   }
 
@@ -1358,7 +1402,7 @@ export class Game {
       e.windup -= dt;
       if (e.windup <= 0) {
         const angle = Math.atan2(dy, dx);
-        if (dist < e.radius + p.radius + 12 && p.hurt(e.def.damage, this.effects)) {
+        if (dist < e.radius + p.radius + 12 && this.world.lineOfSight(e.x, e.y, p.x, p.y) && p.hurt(e.def.damage, this.effects, e)) {
           this.stats.damageTaken += e.def.damage;
           this.camera.kick(7);
           this.freeze = 0.05;
@@ -1447,9 +1491,10 @@ export class Game {
         continue;
       }
       if (!p.dead && dist2(pr.x, pr.y, p.x, p.y - 14) < (pr.radius + p.radius) ** 2) {
-        if (p.hurt(pr.damage, this.effects)) {
+        if (p.hurt(pr.damage, this.effects, pr)) {
           this.stats.damageTaken += pr.damage;
           this.camera.kick(5);
+          this.freeze = 0.04; // an arrow should land like a swing does
           this.effects.text(p.x, p.y - 26, `-${pr.damage}`, '#ff7a7a');
           this.audio?.hurt();
         }
@@ -1532,6 +1577,7 @@ export class Game {
 
     this.#drawLighting(ctx);
     this.#drawDanger(ctx);
+    this.#drawHitDirection(ctx);
   }
 
   #visibleBounds() {
@@ -1687,6 +1733,28 @@ export class Game {
     ctx.save();
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  // A wedge on the edge of the screen showing which way the last hit came from,
+  // drawn in screen space after the camera transform has been undone.
+  #drawHitDirection(ctx) {
+    const p = this.player;
+    if (!p || p.hurtFromTimer <= 0 || p.dead) return;
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    const rad = Math.min(W, H) * 0.3;
+    const fade = Math.min(1, p.hurtFromTimer / 0.35);
+    ctx.save();
+    ctx.translate(W / 2, H / 2);
+    ctx.rotate(p.hurtFrom);
+    ctx.globalAlpha = fade * 0.5;
+    ctx.fillStyle = '#ff5a4a';
+    ctx.beginPath();
+    ctx.arc(0, 0, rad + 60, -0.42, 0.42);
+    ctx.arc(0, 0, rad, 0.42, -0.42, true);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
   }
 

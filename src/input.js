@@ -15,6 +15,7 @@ const ACTIONS = {
   KeyM: 'map',
   Escape: 'pause',
   KeyP: 'pause',
+  KeyR: 'restart',
 };
 
 export class Input {
