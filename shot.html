@@ -42,5 +42,7 @@ for(let t=0;t<secs;t+=DT){
 }
 if(q.get('draft')){ game.pendingLevels=1; game.update(0.0001); }
 if(q.get('pause')) ui.togglePause();
+if(q.get('nolight')) game._drawLighting = () => {};
+if(q.get('noprops')) game.world.props = [];
 game.draw(); ui.draw(1/60); document.title='READY';
 </script></body></html>

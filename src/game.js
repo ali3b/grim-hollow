@@ -89,13 +89,27 @@ const PROP_TYPES = {
 // brazier and a rune orb all lit their surroundings identically. The darkness
 // pass still carves the hole; the colour pass tints it afterwards.
 const LIGHTS = {
-  torch: { radius: 155, colour: '255, 178, 96', strength: 0.62 },
-  brazier: { radius: 215, colour: '255, 132, 58', strength: 0.72 },
-  rune_orb: { radius: 130, colour: '146, 116, 255', strength: 0.66 },
+  torch: { radius: 120, colour: '255, 178, 96', strength: 0.5 },
+  brazier: { radius: 158, colour: '255, 132, 58', strength: 0.6 },
+  rune_orb: { radius: 108, colour: '146, 116, 255', strength: 0.55 },
 };
 
-// The knight's own pool, so you are never in pitch dark.
-const LANTERN = { radius: 172, colour: '146, 178, 255', strength: 0.34 };
+// The knight's own pool, so you are never in pitch dark. Deliberately dim: this
+// is a fill so you can read the floor, not a spotlight that erases it.
+const LANTERN = { radius: 168, colour: '158, 186, 255', strength: 0.3 };
+
+// How much darkness one light removes, and how much there is to begin with.
+// This pair is the whole look. At 0.92 per light the second torch in a room
+// already meant "no darkness left", so lit floor blew out to flat white and
+// everything outside it went to black - two states and no in between. At 0.34
+// the lights accumulate: one is a pool, three is a lit room, and the ramp
+// between them is what makes a dungeon read as a space rather than a stencil.
+const CARVE_ALPHA = 0.42;
+const AMBIENT = 0.86;
+
+// How far up each prop its flame sits, so a torch does not cast its pool from
+// knee height and a brazier from the floor.
+const LIFT = { torch: 26, brazier: 34, rune_orb: 14 };
 
 // Levelling used to be maxHp += 18, a free full heal and damage += 5 - three
 // lines that never gave the player a decision, and the free heal meant potions
@@ -2069,8 +2083,8 @@ export class Game {
     };
     // How far the darkness is carved back; the colour profile falls off faster,
     // so a lit floor keeps contrast instead of going flat and milky.
-    const carve = () => build('255,255,255', [[0, 1], [0.55, 0.72], [1, 0]]);
-    const glow = (colour) => build(colour, [[0, 0.85], [0.32, 0.34], [0.68, 0.08], [1, 0]]);
+    const carve = () => build('255,255,255', [[0, 1], [0.42, 0.72], [0.74, 0.3], [1, 0]]);
+    const glow = (colour) => build(colour, [[0, 0.9], [0.26, 0.38], [0.58, 0.1], [1, 0]]);
 
     const lc = this._lightCanvas;
     const lctx = lc.getContext('2d');
@@ -2079,11 +2093,11 @@ export class Game {
 
     // Collect the lights once so the darkness pass and the colour pass agree.
     const lights = [];
-    const add = (x, y, r, colour, strength) => {
+    const add = (x, y, r, colour, strength, falloff = 1) => {
       const sx = x - this.camera.x;
       const sy = y - this.camera.y;
       if (sx < -r || sy < -r || sx > W + r || sy > H + r) return;
-      lights.push({ sx, sy, r, colour, strength });
+      lights.push({ sx, sy, r, colour, strength, falloff });
     };
 
     if (this.player && !this.player.dead) {
@@ -2093,18 +2107,22 @@ export class Game {
     for (const prop of this.world.props) {
       const light = LIGHTS[prop.kind];
       if (!light || prop.dead) continue;
+      // Two detuned sines: a real flame gutters, and if the whole room pulses
+      // in lockstep it reads as a strobe rather than fire.
       const flick = 0.92 + Math.sin(this.time * 7 + prop.phase) * 0.05 + Math.sin(this.time * 13.3 + prop.phase * 2) * 0.03;
-      add(prop.x, prop.y - 14, light.radius * flick, light.colour, light.strength * flick);
+      // Sit the pool at the flame, which is up the sprite, not at its base.
+      const lift = LIFT[prop.kind] ?? 10;
+      add(prop.x, prop.y - lift, light.radius * flick, light.colour, light.strength * flick, flick);
     }
 
     // Pass 1: carve the darkness.
     lctx.globalCompositeOperation = 'source-over';
     lctx.globalAlpha = 1;
-    lctx.fillStyle = 'rgba(4,3,9,0.90)';
+    lctx.fillStyle = `rgba(6,5,14,${AMBIENT})`;
     lctx.fillRect(0, 0, W, H);
     lctx.globalCompositeOperation = 'destination-out';
     for (const l of lights) {
-      lctx.globalAlpha = 0.92;
+      lctx.globalAlpha = CARVE_ALPHA * l.falloff;
       lctx.drawImage(carve(), l.sx - l.r, l.sy - l.r, l.r * 2, l.r * 2);
     }
 
