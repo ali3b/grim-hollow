@@ -12,3 +12,5 @@ __pycache__/
 
 # The Synty Sprite Generator writes its own export here when syncing.
 # tools/sync_assets.py copies the parts we ship into assets/sprites/.
+# grade_tileset.py keeps the generator's export so its grade is idempotent
+assets/tilesets/hollow_floor/hollow_floor.png.orig
