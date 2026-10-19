@@ -255,9 +255,20 @@ export class UI {
     const w = Math.min(420, W - 60);
     const x = (W - w) / 2;
     const y = this.compact ? 190 : H - 128;
-    this.#panel(ctx, x - 8, y - 18, w + 16, 34);
-    this.#text(ctx, 'THE WARLOCK', W / 2, y - 5, { size: 11, colour: '#d8b4ff', align: 'center', weight: 'bold' });
-    this.#bar(ctx, x, y, w, 12, boss.hp / boss.maxHp, '#8a3fd6');
+    this.#panel(ctx, x - 8, y - 18, w + 16, boss.phase >= 3 ? 40 : 34);
+    const label = boss.phase >= 3 ? 'THE WARLOCK  ·  UNBOUND' : 'THE WARLOCK';
+    this.#text(ctx, label, W / 2, y - 5, {
+      size: 11,
+      colour: boss.phase >= 3 ? '#ff9a6a' : '#d8b4ff',
+      align: 'center',
+      weight: 'bold',
+    });
+    // Phase gates, so the bar shows there is more fight left after each break.
+    const floors = boss.def.phases || [1];
+    const marks = floors.slice(1);
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    for (const f of marks) ctx.fillRect(x + w * f, y - 1, 2, 14);
+    this.#bar(ctx, x, y, w, 12, boss.hp / boss.maxHp, boss.phase >= 3 ? '#c2542a' : '#8a3fd6');
   }
 
   #objective(ctx, W, H) {

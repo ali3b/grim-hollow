@@ -109,7 +109,7 @@
         let guard = 0;
         while (game.state === 'play' && guard++ < 20) step([0, 0]);
       }
-      say('bossSpawned=' + game.bossSpawned + ' bossDead=' + game.bossDead + ' exitOpen=' + game.exitOpen);
+      say('bossSpawned=' + game.bossSpawned + ' bossDead=' + game.bossDead + ' exitOpen=' + game.exitOpen + ' bossPhaseReached=' + game.bossPhase);
       say('final state=' + game.state + ' kills=' + game.stats.kills + ' frames=' + frames);
       say('runtime errors: ' + (errs.length ? errs.join(' | ') : 'none'));
       out.textContent = log.join('\n');

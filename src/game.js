@@ -55,7 +55,20 @@ const ENEMY_TYPES = {
   skeleton_knight: { hp: 50, speed: 68, damage: 14, reach: 34, cooldown: 1.25, souls: 11, range: 24, aggro: 210, scale: 1 },
   skeleton_ranger: { hp: 32, speed: 66, damage: 12, reach: 16, cooldown: 2.0, souls: 10, range: 300, aggro: 300, ranged: 'arrow', scale: 1 },
   demon: { hp: 105, speed: 88, damage: 22, reach: 42, cooldown: 1.5, souls: 26, range: 30, aggro: 230, scale: 1.2 },
-  darklord: { hp: 460, speed: 80, damage: 26, reach: 46, cooldown: 1.1, souls: 250, range: 32, aggro: 4000, scale: 1.28, boss: true },
+  darklord: {
+    hp: 1500,
+    speed: 80,
+    damage: 26,
+    reach: 46,
+    cooldown: 1.1,
+    souls: 250,
+    range: 32,
+    aggro: 4000,
+    scale: 1.28,
+    boss: true,
+    // Phase floors as a fraction of max HP. 1 is the opener.
+    phases: [1, 0.66, 0.33],
+  },
 };
 
 // How each placed prop behaves. `solid` props block movement.
@@ -502,6 +515,11 @@ export class Enemy extends Body {
       castMax: 0,
       summon: 0,
       tellFlash: 0,
+      // Boss only, meaningless on anything else.
+      phase: 1,
+      phaseBreak: 0,
+      blinkCd: 4,
+      castCd: 6,
       homeX: x,
       homeY: y,
       zone,
@@ -559,6 +577,7 @@ export class Game {
     this.prompt = null;
     this.bossSpawned = false;
     this.bossDead = false;
+    this.bossPhase = 0;
     this.exitOpen = false;
     this.entities = [];
     this.projectiles = [];
@@ -589,6 +608,7 @@ export class Game {
     this.messages = [];
     this.bossSpawned = false;
     this.bossDead = false;
+    this.bossPhase = 0;
     this.exitOpen = false;
     this.stats = { kills: 0, damageTaken: 0 };
     this.freeze = 0;
@@ -767,6 +787,119 @@ export class Game {
     this.effects.ring(this.player.x, this.player.y - 14, { colour: '#ffd479', grow: 280, radius: 8, life: 0.6, width: 5 });
     this.audio?.ui();
     return true;
+  }
+
+  // The Warlock gets a real fight: it summons, it throws a radial volley, it
+  // blinks away when you crowd it, and below a third of its health it stops
+  // being polite about any of it.
+  #bossBrain(e, p, dx, dy, dist, dt) {
+    const phase = e.phase;
+    const enraged = phase >= 3;
+    const speed = e.def.speed * (enraged ? 1.35 : phase >= 2 ? 1.12 : 1);
+
+    // Phase break: a beat of stillness, a flash, and a say so the change lands.
+    if (e.phaseBreak > 0) {
+      e.phaseBreak -= dt;
+      e.state = 'roar';
+      return { x: 0, y: 0 };
+    }
+
+    // Blinks when you are on top of it, or just after a phase break.
+    e.blinkCd -= dt;
+    if (e.blinkCd <= 0 && (dist < e.def.reach * 1.5 || phase >= 2) && dist < 260) {
+      const spot = this.world.randomPointIn(e.zone || { rect: [25, 49, 43, 61] }, this.rng, 24);
+      const a = Math.atan2(spot.y - e.y, spot.x - e.x);
+      this.effects.burst(e.x, e.y - e.radius, 16, { colour: '#c08cff', speed: 190, life: 0.4, lift: 20 });
+      e.x = spot.x;
+      e.y = spot.y;
+      e.summon = 0.35;
+      this.effects.burst(e.x, e.y - e.radius, 16, { colour: '#e0c0ff', speed: 190, life: 0.4, lift: 20 });
+      this.audio?.bossRoar();
+      e.blinkCd = enraged ? 3.2 : phase >= 2 ? 4.4 : 6;
+    }
+
+    // Radial volley from phase 2, and a summons drop in phase 2 and 3.
+    e.castCd -= dt;
+    if (e.castCd <= 0) {
+      e.castCd = enraged ? 2.4 : 4.6;
+      if (phase >= 2) this.#bossVolley(e, p, enraged ? 7 : 5);
+      if (phase >= 2) this.#bossSummons(e, enraged ? 3 : 2);
+    }
+
+    const want = e.def.reach + p.radius + e.radius - 6;
+    if (dist > want) {
+      e.state = 'chase';
+      return { x: (dx / dist) * (speed / e.def.speed), y: (dy / dist) * (speed / e.def.speed) };
+    }
+
+    e.state = 'attack';
+    if (e.windup > 0) {
+      e.windup -= dt;
+      if (e.windup <= 0) {
+        const angle = Math.atan2(dy, dx);
+        const dmg = e.def.damage * (enraged ? 1.25 : 1);
+        if (dist < e.radius + p.radius + 12 && p.hurt(dmg, this.effects)) {
+          this.stats.damageTaken += dmg;
+          this.camera.kick(9);
+          this.freeze = 0.05;
+          this.audio?.hurt();
+          this.effects.text(p.x, p.y - 26, `-${Math.round(dmg)}`, '#ff7a7a');
+        }
+        this.effects.burst(e.x + Math.cos(angle) * e.radius, e.y + Math.sin(angle) * e.radius - 8, 8, {
+          colour: '#c08cff',
+          speed: 130,
+          life: 0.3,
+          spread: 1.4,
+          angle,
+        });
+        e.attackAnim = 0.34;
+      }
+      return { x: 0, y: 0 };
+    }
+    if (e.attackCd <= 0) {
+      e.attackCd = e.def.cooldown * (enraged ? 0.7 : 1);
+      e.windup = ENEMY_WINDUP * (enraged ? 0.7 : 1);
+      e.attackAnim = e.windup + 0.22;
+      e.castAnim = 0;
+      e.tellFlash = e.windup;
+    }
+    return { x: 0, y: 0 };
+  }
+
+  #bossVolley(e, p, n) {
+    // Lead the player a little, then fan out. Unavoidable by standing still.
+    const base = Math.atan2(p.y + p.vy * 0.12 - e.y, p.x + p.vx * 0.12 - e.x);
+    const speed = 132;
+    for (let i = 0; i < n; i++) {
+      const a = base + (i - (n - 1) / 2) * 0.38;
+      this.projectiles.push(
+        new Projectile(e.x + Math.cos(a) * (e.radius + 8), e.y + Math.sin(a) * (e.radius + 8) - 8, Math.cos(a) * speed, Math.sin(a) * speed, {
+          damage: e.def.damage * 0.55,
+          kind: 'orb',
+          life: 3.4,
+        }),
+      );
+    }
+    this.effects.ring(e.x, e.y - e.radius, { colour: '#c08cff', grow: 190, radius: 14, life: 0.35, width: 4 });
+    this.audio?.bossRoar();
+  }
+
+  #bossSummons(e, n) {
+    // Cap the adds: a long fight should not quietly become a hundred goblins.
+    let live = 0;
+    for (const o of this.entities) if (o instanceof Enemy && !o.dead && !o.isBoss) live++;
+    n = Math.max(0, Math.min(n, 8 - live));
+    if (!n) return;
+    const kind = this.rng() < 0.5 ? 'goblin_brute' : 'skeleton_ranger';
+    for (let i = 0; i < n; i++) {
+      const spot = this.world.randomPointIn(e.zone || { rect: [25, 49, 43, 61] }, this.rng, 30);
+      const add = new Enemy(kind, spot.x, spot.y, e.zone);
+      add.anim = new Animator(this.sprites[kind]);
+      add.summon = 0.6;
+      add.aggro = true;
+      this.entities.push(add);
+    }
+    this.effects.ring(e.x, e.y - e.radius, { colour: '#8a5cff', grow: 240, radius: 12, life: 0.5, width: 4 });
   }
 
   #checkExtraction() {
@@ -999,6 +1132,30 @@ export class Game {
 
   #damageEnemy(enemy, amount, angle, heavy = false, crit = false) {
     enemy.hp -= amount;
+
+    // Phase breaks read from hp, so they fire exactly once per threshold even
+    // when one swing crosses two of them.
+    if (enemy.isBoss && !enemy.dead) {
+      const frac = Math.max(0, enemy.hp) / enemy.maxHp;
+      const floors = enemy.def.phases || [1];
+      let next = 1;
+      for (let i = 0; i < floors.length; i++) if (frac <= floors[i]) next = i + 1;
+      if (next > enemy.phase) {
+        enemy.phase = next;
+        this.bossPhase = next;
+        enemy.phaseBreak = 0.9;
+        enemy.castCd = 2.2;
+        enemy.blinkCd = 1.6;
+        enemy.castAnim = 0;
+        enemy.windup = 0;
+        this.camera.kick(14);
+        this.audio?.bossRoar();
+        this.effects.ring(enemy.x, enemy.y - enemy.radius, { colour: '#c08cff', grow: 420, radius: 16, life: 0.8, width: 6 });
+        this.effects.burst(enemy.x, enemy.y - enemy.radius, 34, { colour: '#c08cff', speed: 260, life: 0.8, lift: 40 });
+        this.say(enemy.phase === 2 ? 'The rune flares - it calls for help.' : 'It stops holding back.', '#c08cff');
+      }
+    }
+
     enemy.flash = 0.15;
     enemy.aggro = true;
     enemy.state = 'chase';
@@ -1096,7 +1253,11 @@ export class Game {
         e.stagger -= dt;
         e.state = 'hurt';
       } else if (e.aggro) {
-        move = e.def.ranged ? this.#rangedBrain(e, p, dx, dy, dist, dt) : this.#meleeBrain(e, p, dx, dy, dist, dt);
+        move = e.isBoss
+          ? this.#bossBrain(e, p, dx, dy, dist, dt)
+          : e.def.ranged
+            ? this.#rangedBrain(e, p, dx, dy, dist, dt)
+            : this.#meleeBrain(e, p, dx, dy, dist, dt);
         e.facing = facingFromVector(dx, dy);
       } else {
         e.stateTimer -= dt;
