@@ -78,6 +78,17 @@ async function boot() {
     window.removeEventListener('keydown', wake);
     window.removeEventListener('touchstart', wake);
   };
+  // Tap a card on the draft. Registered on the canvas so it works for touch
+  // and mouse alike, and ignored unless a draft is actually open.
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!game.draft) return;
+    const i = ui.pickCard(e.clientX, e.clientY);
+    if (i >= 0) {
+      game.choose(i);
+      e.preventDefault();
+    }
+  });
+
   window.addEventListener('pointerdown', wake);
   window.addEventListener('keydown', wake);
   window.addEventListener('touchstart', wake);
@@ -132,6 +143,24 @@ async function boot() {
       ui.key(input.lastPauseKey);
       input.lastPauseKey = null;
       game.camera.scale = ui.shake ? 1 : 0;
+      game.draw();
+      ui.draw(dt);
+      input.endFrame();
+      requestAnimationFrame(frame);
+      return;
+    }
+
+    // A level-up draft is modal: it takes the whole frame, from any input.
+    if (game.draft) {
+      const key = input.lastPauseKey;
+      input.lastPauseKey = null;
+      if (key) {
+        const n = ['Digit1', 'Digit2', 'Digit3', 'Numpad1', 'Numpad2', 'Numpad3'].indexOf(key);
+        if (n >= 0) game.choose(n);
+      }
+      // Clear any attack the player was holding so the pick does not fire a swing.
+      input.consume('attack');
+      input.consume('interact');
       game.draw();
       ui.draw(dt);
       input.endFrame();

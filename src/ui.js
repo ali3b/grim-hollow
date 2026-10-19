@@ -14,6 +14,16 @@ export class UI {
     this.paused = false;
     this.savedShowMap = false;
     this.shake = true;
+    this.cardRects = [];
+    this.cardHover = -1;
+  }
+
+  // Pointer position in CSS pixels, for hit-testing the draft cards.
+  pickCard(cssX, cssY) {
+    const r = this.canvas.getBoundingClientRect();
+    const x = ((cssX - r.left) / r.width) * this.canvas.width;
+    const y = ((cssY - r.top) / r.height) * this.canvas.height;
+    return this.cardRects.findIndex((c) => x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h);
   }
 
   // Narrow viewports (phones) drop the minimap and move the HUD clear of the
@@ -37,6 +47,12 @@ export class UI {
     if (this.paused) {
       this.#vitals(ctx, W, H);
       this.#pause(ctx, W, H);
+      return;
+    }
+
+    if (g.draft) {
+      this.#vitals(ctx, W, H);
+      this.#draft(ctx, W, H);
       return;
     }
 
@@ -111,6 +127,60 @@ export class UI {
   }
 
   // --- pieces ------------------------------------------------------------
+
+  // The level-up draft: three cards, take one. Keyboard 1/2/3, or click/tap.
+  #draft(ctx, W, H) {
+    const g = this.game;
+    ctx.fillStyle = 'rgba(4,3,9,0.82)';
+    ctx.fillRect(0, 0, W, H);
+
+    this.#text(ctx, `LEVEL ${g.player.level}`, W / 2, H / 2 - 150, { size: 30, colour: '#ffd479', align: 'center', weight: 'bold' });
+    this.#text(ctx, 'choose one', W / 2, H / 2 - 122, { size: 13, colour: '#b0a6c4', align: 'center' });
+
+    const gap = 16;
+    const cw = Math.min(230, (W - gap * 4) / 3);
+    const ch = 148;
+    const x0 = W / 2 - (cw * 3 + gap * 2) / 2;
+    const y = H / 2 - 74;
+
+    this.cardRects = [];
+    g.draft.forEach((card, i) => {
+      const x = x0 + i * (cw + gap);
+      const hot = this.cardHover === i;
+      ctx.fillStyle = hot ? 'rgba(38,28,54,0.95)' : 'rgba(16,12,24,0.95)';
+      ctx.fillRect(x, y, cw, ch);
+      ctx.strokeStyle = hot ? '#ffd479' : 'rgba(150,130,190,0.4)';
+      ctx.lineWidth = hot ? 2 : 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, cw - 1, ch - 1);
+
+      this.#text(ctx, card.name, x + cw / 2, y + 40, { size: 16, colour: '#ffd479', align: 'center', weight: 'bold' });
+
+      // Wrap the description: cards are narrow and some lines run long.
+      const words = card.desc.split(' ');
+      const lines = [];
+      let line = '';
+      ctx.font = '12px ' + MONO;
+      for (const w of words) {
+        if (ctx.measureText(line + w).width > cw - 28 && line) {
+          lines.push(line);
+          line = w;
+        } else line = line ? line + ' ' + w : w;
+      }
+      lines.push(line);
+      lines.forEach((l, li) => this.#text(ctx, l, x + cw / 2, y + 74 + li * 16, { size: 12, colour: '#d8cfe4', align: 'center' }));
+
+      this.#text(ctx, `[ ${i + 1} ]`, x + cw / 2, y + ch - 16, { size: 11, colour: hot ? '#ffd479' : '#8b7fa8', align: 'center' });
+      this.cardRects.push({ x, y, w: cw, h: ch });
+    });
+
+    if (g.pendingLevels > 0) {
+      this.#text(ctx, `${g.pendingLevels} more level${g.pendingLevels > 1 ? 's' : ''} waiting`, W / 2, y + ch + 26, {
+        size: 11,
+        colour: '#8b7fa8',
+        align: 'center',
+      });
+    }
+  }
 
   #panel(ctx, x, y, w, h, alpha = 0.72) {
     ctx.fillStyle = `rgba(9,7,14,${alpha})`;

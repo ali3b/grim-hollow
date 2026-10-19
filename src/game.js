@@ -83,7 +83,26 @@ const LIGHTS = {
 // The knight's own pool, so you are never in pitch dark.
 const LANTERN = { radius: 172, colour: '146, 178, 255', strength: 0.34 };
 
-const SOULS_PER_LEVEL = [0, 60, 150, 280, 460, 700, 1000];
+// Levelling used to be maxHp += 18, a free full heal and damage += 5 - three
+// lines that never gave the player a decision, and the free heal meant potions
+// stopped mattering halfway through a run. Now a level is a draft: three of
+// these, take one. Levels still grant a small automatic bump on top.
+const UPGRADES = [
+  { id: 'edge', name: 'Whetstone', desc: '+20% attack damage', max: 5, apply: (p) => { p.damage *= 1.2; } },
+  { id: 'vitality', name: 'Heartwood', desc: '+30 max HP, and heal for it', max: 5, apply: (p) => { p.maxHp += 30; p.hp = Math.min(p.maxHp, p.hp + 30); } },
+  { id: 'haste', name: 'Quickened', desc: '+45% time to chain the next hit', max: 3, apply: (p) => { p.comboWindow *= 1.45; } },
+  { id: 'footwork', name: 'Fleet', desc: '-25% dash cooldown', max: 3, apply: (p) => { p.dashCdMax *= 0.75; p.dashCooldown = Math.min(p.dashCooldown, p.dashCdMax); } },
+  { id: 'cruel', name: 'Heavy Hands', desc: '+55% heavy attack damage', max: 3, apply: (p) => { p.heavyPower *= 1.55; } },
+  { id: 'whirlwind', name: 'Whirlwind', desc: 'Your third hit sweeps a full circle', max: 1, apply: (p) => { p.whirlwind = true; } },
+  { id: 'shockwave', name: 'Shockwave', desc: 'Dashing detonates and hurts what is close', max: 1, apply: (p) => { p.shockwave = true; } },
+  { id: 'magnet', name: 'Soul Drain', desc: 'Souls come to you from twice as far', max: 1, apply: (p) => { p.magnet *= 2; } },
+  { id: 'quiver', name: 'Quiver', desc: '+1 potion carried', max: 2, apply: (p) => { p.potions += 1; } },
+  { id: 'resolve', name: 'Resolve', desc: '18% of hits land a killing blow', max: 4, apply: (p) => { p.crit += 0.18; } },
+];
+
+const DRAFT_SIZE = 3;
+
+const SOULS_PER_LEVEL = [0, 45, 100, 175, 270, 390, 540];
 
 // --- helpers -------------------------------------------------------------
 
@@ -406,19 +425,34 @@ export class Player extends Body {
     this.swingId = 0;
     this.ghosts = [];
     this.footTimer = 0;
+    // Everything the draft can change. Kept on the player so a run's build is
+    // legible in one place.
+    this.comboWindow = P.comboWindow;
+    this.dashCdMax = P.dashCooldown;
+    this.heavyPower = 2.1;
+    this.magnet = 96;
+    this.crit = 0;
+    this.whirlwind = false;
+    this.shockwave = false;
+    this.taken = [];
   }
 
+  countOf(id) {
+    return this.taken.filter((u) => u === id).length;
+  }
+
+  // Returns how many levels were gained; the Game turns that into a draft.
   addSouls(n) {
     this.souls += n;
-    let up = false;
+    let gained = 0;
     while (this.level < SOULS_PER_LEVEL.length - 1 && this.souls >= SOULS_PER_LEVEL[this.level]) {
       this.level++;
-      this.maxHp += 18;
-      this.hp = this.maxHp;
-      this.damage = P.attackDamage + (this.level - 1) * 5;
-      up = true;
+      this.maxHp += 8;
+      this.hp = Math.min(this.maxHp, this.hp + 8);
+      this.damage += 3;
+      gained++;
     }
-    return up;
+    return gained;
   }
 
   soulFloor() {
@@ -535,6 +569,10 @@ export class Game {
     this.lavaTimer = 0;
     this.roomsSeen = new Set();
     this.audio = null;
+    // A draft is a modal pick; while one is open the sim is paused and nothing
+    // ticks, so it is safe to open mid-fight.
+    this.draft = null;
+    this.pendingLevels = 0;
 
     this.spawn = world.zone('entry') || { rect: [8, 34, 10, 36], name: 'Entry' };
     this.extraction = world.zone('stairs_out');
@@ -557,6 +595,8 @@ export class Game {
     this.lookAhead = { x: 0, y: 0 };
     this.lavaTimer = 0;
     this.roomsSeen = new Set([this.spawn.id]);
+    this.draft = null;
+    this.pendingLevels = 0;
 
     for (const p of this.world.props) {
       p.dead = false;
@@ -586,6 +626,9 @@ export class Game {
   // --- loop --------------------------------------------------------------
 
   update(dt) {
+    // A draft is a modal: the world stops until a card is chosen.
+    if (this.draft) return;
+
     this.time += dt;
     for (const m of this.messages) m.life -= dt;
     this.messages = this.messages.filter((m) => m.life > 0);
@@ -642,10 +685,14 @@ export class Game {
       this.player.deathTimer += dt;
       if (this.player.deathTimer > 1.5) {
         this.state = 'lost';
+        this.draft = null;
+        this.pendingLevels = 0;
         this.audio?.lose();
         this.audio?.setTension(0);
       }
     }
+
+    this.#maybeDraft();
   }
 
   #pointInRect(x, y, rect) {
@@ -684,6 +731,42 @@ export class Game {
     this.say('The Warlock rises. Break his rune!', '#c08cff');
     this.camera.kick(11);
     this.audio?.bossRoar();
+  }
+
+  // --- levelling draft ---------------------------------------------------
+
+  // Open the next pick if a level is owed and the game is in a state where a
+  // modal is welcome. Dying drops the queue rather than making you draft on
+  // the death card.
+  #maybeDraft() {
+    if (this.draft || this.pendingLevels <= 0) return;
+    if (this.state !== 'play' || this.player.dead) {
+      if (this.state !== 'play') this.pendingLevels = 0;
+      return;
+    }
+    const p = this.player;
+    const pool = UPGRADES.filter((u) => p.countOf(u.id) < u.max);
+    const cards = [];
+    const bag = pool.slice();
+    while (cards.length < DRAFT_SIZE && bag.length) {
+      cards.push(bag.splice(Math.floor(this.rng() * bag.length), 1)[0]);
+    }
+    if (!cards.length) return;
+    this.draft = cards;
+    this.pendingLevels -= 1;
+    this.audio?.levelUp();
+  }
+
+  choose(i) {
+    const card = this.draft?.[i];
+    if (!card) return false;
+    this.draft = null;
+    card.apply(this.player, this);
+    this.player.taken.push(card.id);
+    this.say(card.name, '#ffd479');
+    this.effects.ring(this.player.x, this.player.y - 14, { colour: '#ffd479', grow: 280, radius: 8, life: 0.6, width: 5 });
+    this.audio?.ui();
+    return true;
   }
 
   #checkExtraction() {
@@ -728,13 +811,27 @@ export class Game {
 
     if (inp.consume('dash') && p.dashCooldown <= 0 && len > 0) {
       p.dashTimer = P.dashTime;
-      p.dashCooldown = P.dashCooldown;
+      p.dashCooldown = p.dashCdMax;
       p.invuln = Math.max(p.invuln, P.dashTime + 0.08);
       for (let i = 0; i < 4; i++) {
         p.ghosts.push({ x: p.x - dx * i * 5, y: p.y - dy * i * 5, life: 0.3, maxLife: 0.3 });
       }
       this.effects.burst(p.x, p.y - 12, 10, { colour: '#8fa6d8', speed: 130, life: 0.35, lift: 12 });
       this.audio?.dash();
+
+      // Shockwave upgrade: the dash itself is the hit.
+      if (p.shockwave) {
+        const R = 74;
+        this.effects.ring(p.x, p.y - 10, { colour: '#9fc4ff', grow: R * 2.6, radius: 10, life: 0.34, width: 4 });
+        this.audio?.hit(true);
+        this.camera.kick(4);
+        for (const e of this.entities) {
+          if (!(e instanceof Enemy) || e.dead) continue;
+          if (Math.hypot(e.x - p.x, e.y - p.y) > R + e.radius) continue;
+          const a = Math.atan2(e.y - p.y, e.x - p.x);
+          this.#damageEnemy(e, p.damage * 0.8, a, false);
+        }
+      }
     }
     for (const g of p.ghosts) g.life -= dt;
     p.ghosts = p.ghosts.filter((g) => g.life > 0);
@@ -846,8 +943,11 @@ export class Game {
     const beat = p.swing || COMBO[0];
     const heavy = !!beat.heavy;
     const reach = heavy ? beat.reach : P.attackReach * beat.reach;
-    const arc = heavy ? beat.arc : P.attackArc * beat.arc;
-    const damage = p.damage * beat.damage;
+    const finisher = beat === COMBO[COMBO.length - 1];
+    const arc = p.whirlwind && finisher && !heavy ? TAU : heavy ? beat.arc : P.attackArc * beat.arc;
+    let damage = p.damage * (heavy ? p.heavyPower : beat.damage);
+    const crit = this.rng() < p.crit;
+    if (crit) damage *= 2;
     const base = { S: Math.PI / 2, W: Math.PI, E: 0, N: -Math.PI / 2 }[p.facing];
 
     let hit = false;
@@ -859,7 +959,7 @@ export class Game {
       const diff = Math.abs(((a - base + Math.PI * 3) % TAU) - Math.PI);
       if (diff > arc / 2) continue;
       p.attackHits.add(e.id);
-      this.#damageEnemy(e, damage, a, heavy);
+      this.#damageEnemy(e, damage, a, heavy, crit);
       hit = true;
     }
 
@@ -897,7 +997,7 @@ export class Game {
     }
   }
 
-  #damageEnemy(enemy, amount, angle, heavy = false) {
+  #damageEnemy(enemy, amount, angle, heavy = false, crit = false) {
     enemy.hp -= amount;
     enemy.flash = 0.15;
     enemy.aggro = true;
@@ -919,12 +1019,18 @@ export class Game {
       life: 0.4,
       lift: 18,
     });
-    this.effects.text(enemy.x, enemy.y - enemy.radius * 2.2, String(Math.round(amount)), '#ffe08a');
+    this.effects.text(
+      enemy.x,
+      enemy.y - enemy.radius * 2.2,
+      crit ? `${Math.round(amount)}!` : String(Math.round(amount)),
+      crit ? '#ff9a4d' : '#ffe08a',
+    );
 
     if (enemy.hp <= 0) {
       enemy.dead = true;
       this.stats.kills++;
       const levelled = this.player.addSouls(enemy.def.souls);
+      if (levelled) this.pendingLevels += levelled;
       this.effects.burst(enemy.x, enemy.y - enemy.radius, enemy.isBoss ? 60 : 22, {
         colour: enemy.isBoss ? '#b47bff' : '#8a3a2a',
         speed: 180,
@@ -1199,15 +1305,15 @@ export class Game {
       it.bob += dt * 4;
       if (p.dead) continue;
       const d = Math.hypot(p.x - it.x, p.y - 14 - (it.y - 14)) || 1;
-      if (d < 96) {
-        const pull = (1 - d / 96) * 430;
+      if (d < p.magnet) {
+        const pull = (1 - d / p.magnet) * 430;
         it.x += ((p.x - it.x) / d) * pull * dt;
         it.y += ((p.y - 14 - it.y) / d) * pull * dt;
       }
       if (d < 24) {
         it.taken = true;
         if (it.kind === 'souls') {
-          p.addSouls(it.value);
+          this.pendingLevels += p.addSouls(it.value);
           this.audio?.souls();
           this.effects.text(it.x, it.y - 12, `+${it.value} souls`, '#a9d8ff');
         } else {

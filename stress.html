@@ -33,7 +33,10 @@ for(let run=0; run<40; run++){
     else if(r<0.50) input.pressed.add('dash');
     else if(r<0.53) input.pressed.add('potion');
     game.player.hp=game.player.maxHp;
-    game.update(1/60); game.draw();
+    game.update(1/60);
+    // A draft is modal; take one so the fuzz keeps running.
+    while (game.draft) game.choose(r%game.draft.length|0);
+    game.draw();
     input.pressed.clear();
   }
   log.push('run '+run+' ok  kills='+game.stats.kills);

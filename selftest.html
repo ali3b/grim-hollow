@@ -46,6 +46,8 @@
         input.axis.y = axis[1];
         input.pressed = new Set(actions);
         game.update(DT);
+        // A level-up draft is modal and freezes the sim until a card is taken.
+        while (game.draft) game.choose(Math.floor(Math.random() * game.draft.length));
         game.draw();
         input.pressed.clear();
         frames++;
