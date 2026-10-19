@@ -464,6 +464,10 @@ export class Enemy extends Body {
       kx: 0,
       ky: 0,
       stagger: 0,
+      moving: false,
+      castMax: 0,
+      summon: 0,
+      tellFlash: 0,
       homeX: x,
       homeY: y,
       zone,
@@ -953,6 +957,7 @@ export class Game {
 
       if (e.dead) {
         e.deathTimer += dt;
+        this.#animateEnemy(e, dt);
         continue;
       }
       e.flash = Math.max(0, e.flash - dt);
@@ -1019,7 +1024,10 @@ export class Game {
         }
       }
 
+      const wasX = e.x;
+      const wasY = e.y;
       this.world.moveCircle(e, vx * dt, vy * dt);
+      e.moving = Math.hypot(e.x - wasX, e.y - wasY) > 0.4;
 
       if (e.kx || e.ky) {
         this.world.moveCircle(e, e.kx * dt, e.ky * dt);
@@ -1041,12 +1049,32 @@ export class Game {
     const sprite = this.sprites[e.kind];
     if (!sprite || !e.anim) return;
     const f = e.facing;
-    let clip = null;
-    if (e.castAnim > 0) clip = sprite.find('cast', f) || sprite.find('charge', f);
-    else if (e.attackAnim > 0) clip = sprite.find('attack_1', f);
-    else if (e.aggro) clip = sprite.find('walk', f) || sprite.find('idle', f);
-    else clip = sprite.find('idle', f) || sprite.find('walk', f);
-    e.anim.play(clip || sprite.find('idle', f), { restart: e.attackAnim > 0.25 || e.castAnim > 0.2 });
+    // Assets register a bare alias per clip (sword_death_S is also death_S), so
+    // the game can ask for "death" without knowing which weapon it is holding.
+    const find = (m) => sprite.find(m, f) || sprite.find(m, 'S');
+
+    if (e.dead) {
+      // Sixteen generated death animations that used to play exactly zero times.
+      e.anim.play(find('death') || find('idle'), { restart: e.deathTimer < dt * 2 });
+      e.anim.update(dt);
+      return;
+    }
+    if (e.castAnim > 0) {
+      // A bow draws and then looses. A staff has no cast clip at all, so it
+      // winds up with the swing it actually has rather than playing a walk.
+      const half = (e.castMax || 0) * 0.5;
+      e.anim.play(e.castAnim > half ? (find('draw') || find('attack_1')) : (find('shoot') || find('attack_1') || find('idle')), {
+        restart: e.castAnim > (e.castMax || 0),
+      });
+    } else if (e.attackAnim > 0) {
+      e.anim.play((e.attackAnim > 0.22 ? find('attack_2') : find('attack_1')) || find('attack_1'), { restart: e.attackAnim > 0.34 });
+    } else if (e.aggro && e.moving) {
+      e.anim.play(find('run') || find('walk') || find('idle'));
+    } else if (e.moving) {
+      e.anim.play(find('walk') || find('idle'));
+    } else {
+      e.anim.play(find('idle') || find('walk'));
+    }
     e.anim.update(dt);
   }
 
@@ -1124,6 +1152,7 @@ export class Game {
       e.attackCd = e.def.cooldown;
       e.windup = ENEMY_WINDUP + 0.12;
       e.castAnim = ENEMY_WINDUP + 0.22;
+      e.castMax = e.castAnim;
       e.tellFlash = ENEMY_WINDUP;
     }
 
@@ -1295,10 +1324,7 @@ export class Game {
 
     if (e.dead) {
       ctx.save();
-      ctx.globalAlpha = Math.max(0, 1 - e.deathTimer / 1.1);
-      ctx.translate(e.x, e.y);
-      ctx.scale(1, Math.max(0.05, 1 - e.deathTimer * 0.85));
-      ctx.translate(-e.x, -e.y);
+      ctx.globalAlpha = Math.max(0, 1 - Math.max(0, e.deathTimer - 0.65) / 0.45);
       sprite.draw(ctx, e.anim.clip, e.x, e.y, e.scale);
       ctx.restore();
       return;
@@ -1347,10 +1373,7 @@ export class Game {
 
     if (p.dead) {
       ctx.save();
-      ctx.globalAlpha = Math.max(0, 1 - p.deathTimer / 1.5);
-      ctx.translate(p.x, p.y);
-      ctx.rotate(Math.min(Math.PI / 2, p.deathTimer * 2));
-      ctx.translate(-p.x, -p.y);
+      ctx.globalAlpha = Math.max(0, 1 - Math.max(0, p.deathTimer - 1.0) / 0.5);
       sprite.draw(ctx, p.anim.clip, p.x, p.y, 1);
       ctx.restore();
       return;

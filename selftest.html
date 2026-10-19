@@ -97,12 +97,15 @@
         game.player.hp = game.player.maxHp;
       }
 
-      // Back to the stairwell to finish.
+      // Back to the stairwell to finish. One frame is not enough: the centre of
+      // the stair rect can be inside a wall, and moveCircle nudges the player
+      // out of it before the extraction test runs.
       if (game.exitOpen && game.extraction) {
         const e = world.centreOfRect(game.extraction.rect);
         game.player.x = e.x;
         game.player.y = e.y;
-        step([0, 0]);
+        let guard = 0;
+        while (game.state === 'play' && guard++ < 20) step([0, 0]);
       }
       say('bossSpawned=' + game.bossSpawned + ' bossDead=' + game.bossDead + ' exitOpen=' + game.exitOpen);
       say('final state=' + game.state + ' kills=' + game.stats.kills + ' frames=' + frames);
