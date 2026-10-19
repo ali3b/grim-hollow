@@ -53,10 +53,21 @@ muted from the pause menu.
 ### The run
 
 Clear the halls, then find the Warlock deep in the south. Each room wakes its
-own garrison when you walk in. Souls level you up; chests and smashable barrels
-carry potions and bonus souls. Lava burns, water slows you. When the Warlock
-falls the rune shatters and the stairwell back in the entry hall becomes your
-way out.
+own garrison when you walk in, and throws two more waves at you once you clear
+it — harder each time, and every fourth spawn is an **elite**: bigger, twice the
+health, ringed in gold, and worth more souls.
+
+Enemies have jobs, not just stats. A **skeleton knight** carries a shield that
+blocks anything but a heavy attack, and turns to face you so you cannot flank
+it. A **demon** crouches, then lunges in a straight line and is helpless while
+it recovers. A **goblin shaman** keeps its distance and repositions instead of
+standing still and shooting. That is what the heavy attack is for.
+
+Souls level you up into a draft: three cards, take one, world paused. Chests and
+smashable barrels carry potions and bonus souls. Lava burns, water slows you.
+When the Warlock falls the rune shatters and the stairwell back in the entry
+hall becomes your way out — a chevron on screen points at whatever you are
+heading for and how far it is.
 
 ---
 

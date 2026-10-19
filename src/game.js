@@ -50,11 +50,12 @@ const HEAVY_BEAT = {
 const ENEMY_WINDUP = 0.26;
 
 const ENEMY_TYPES = {
+  // `role` picks the brain; without it every melee type ran identical code.
   goblin_brute: { hp: 36, speed: 76, damage: 11, reach: 32, cooldown: 1.1, souls: 9, range: 22, aggro: 190, scale: 1 },
-  goblin_shaman: { hp: 30, speed: 62, damage: 9, reach: 16, cooldown: 2.5, souls: 14, range: 250, aggro: 250, ranged: 'orb', scale: 1 },
-  skeleton_knight: { hp: 50, speed: 68, damage: 14, reach: 34, cooldown: 1.25, souls: 11, range: 24, aggro: 210, scale: 1 },
+  goblin_shaman: { hp: 30, speed: 62, role: 'kiter', damage: 9, reach: 16, cooldown: 2.5, souls: 14, range: 250, aggro: 250, ranged: 'orb', scale: 1 },
+  skeleton_knight: { hp: 50, speed: 68, role: 'shield', damage: 14, reach: 34, cooldown: 1.25, souls: 11, range: 24, aggro: 210, scale: 1 },
   skeleton_ranger: { hp: 32, speed: 66, damage: 12, reach: 16, cooldown: 2.0, souls: 10, range: 300, aggro: 300, ranged: 'arrow', scale: 1 },
-  demon: { hp: 105, speed: 88, damage: 22, reach: 42, cooldown: 1.5, souls: 26, range: 30, aggro: 230, scale: 1.2 },
+  demon: { hp: 105, speed: 88, role: 'charger', damage: 22, reach: 42, cooldown: 1.5, souls: 26, range: 30, aggro: 230, scale: 1.2 },
   darklord: {
     hp: 1500,
     speed: 80,
@@ -116,6 +117,9 @@ const UPGRADES = [
 const DRAFT_SIZE = 3;
 
 const SOULS_PER_LEVEL = [0, 45, 100, 175, 270, 390, 540];
+
+// How many reinforcement waves a cleared room throws at you before it settles.
+const WAVES_PER_ROOM = 2;
 
 // --- helpers -------------------------------------------------------------
 
@@ -533,6 +537,11 @@ export class Enemy extends Body {
       phaseBreak: 0,
       blinkCd: 4,
       castCd: 6,
+      lunge: 0,
+      recover: 0,
+      pendingLunge: false,
+      damageScale: 1,
+      elite: false,
       homeX: x,
       homeY: y,
       zone,
@@ -591,6 +600,8 @@ export class Game {
     this.bossSpawned = false;
     this.bossDead = false;
     this.bossPhase = 0;
+    this.roomsCleared = 0;
+    this.settledRooms = new Set();
     this.exitOpen = false;
     this.entities = [];
     this.projectiles = [];
@@ -622,6 +633,8 @@ export class Game {
     this.bossSpawned = false;
     this.bossDead = false;
     this.bossPhase = 0;
+    this.roomsCleared = 0;
+    this.settledRooms = new Set();
     this.exitOpen = false;
     this.stats = { kills: 0, damageTaken: 0 };
     this.freeze = 0;
@@ -685,7 +698,7 @@ export class Game {
       return;
     }
 
-    this.#updateTriggers();
+    this.#updateTriggers(dt);
     this.#updatePlayer(dt);
     this.#updateEnemies(dt);
     this.#updateProjectiles(dt);
@@ -740,22 +753,75 @@ export class Game {
     return cx >= rect[0] && cx <= rect[2] && cy >= rect[1] && cy <= rect[3];
   }
 
-  #updateTriggers() {
+  #updateTriggers(dt) {
     for (const z of this.triggers) {
-      if (z.entered || !this.#pointInRect(this.player.x, this.player.y, z.rect)) continue;
-      z.entered = true;
-      this.roomsSeen.add(z.id);
-      if (z.kind === 'patrol') {
-        for (const kind of z.enemies || []) {
-          const p = this.world.randomPointIn(z, this.rng);
-          const enemy = new Enemy(kind, p.x, p.y, z);
-          enemy.anim = new Animator(this.sprites[kind]);
-          this.entities.push(enemy);
+      if (!z.entered) {
+        if (!this.#pointInRect(this.player.x, this.player.y, z.rect)) continue;
+        z.entered = true;
+        this.roomsSeen.add(z.id);
+        if (z.kind === 'patrol') {
+          z.wave = 0;
+          z.waveTimer = 0;
+          this.#spawnWave(z, 1);
+          this.say(`— ${z.name} —`, '#e0b46a');
+        } else if (z.kind === 'boss') {
+          this.#spawnBoss(z);
         }
-        this.say(`— ${z.name} —`, '#e0b46a');
-      } else if (z.kind === 'boss') {
-        this.#spawnBoss(z);
+        continue;
       }
+
+      // A cleared room used to stay empty for the rest of the run, so there
+      // was nothing to come back to and nothing to escalate against.
+      if (z.kind !== 'patrol' || this.bossSpawned) continue;
+      const live = this.#liveIn(z);
+      if (live > 0) {
+        z.waveTimer = 0;
+        continue;
+      }
+      z.waveTimer += dt;
+      if (z.waveTimer > 2.6) {
+        z.waveTimer = 0;
+        z.wave += 1;
+        if (z.wave <= WAVES_PER_ROOM) {
+          this.#spawnWave(z, 1 + z.wave);
+          this.say('Reinforcements.', '#e08a5a');
+        } else if (!this.settledRooms.has(z.id)) {
+          this.settledRooms.add(z.id);
+          this.roomsCleared++;
+        }
+      }
+    }
+  }
+
+  #liveIn(zone) {
+    let n = 0;
+    for (const e of this.entities) if (e instanceof Enemy && !e.dead && e.zone === zone) n++;
+    return n;
+  }
+
+  // Each wave is drawn from the room's own garrison and gets tougher the
+  // deeper into the run it is, so the same room is not the same fight twice.
+  #spawnWave(zone, wave) {
+    const pool = zone.enemies || [];
+    if (!pool.length) return;
+    const scale = 1 + 0.14 * (wave - 1) + 0.1 * this.roomsCleared;
+    for (const kind of pool) {
+      if (this.rng() < Math.min(0.4, 0.12 * wave)) continue; // thin the garrison
+      const at = this.world.randomPointIn(zone, this.rng);
+      const enemy = new Enemy(kind, at.x, at.y, zone);
+      enemy.hp = Math.round(enemy.maxHp * scale);
+      enemy.maxHp = enemy.hp;
+      enemy.damageScale = scale;
+      // One in four is an elite: bigger, tougher, and obvious.
+      if (wave > 1 && this.rng() < 0.26) {
+        enemy.elite = true;
+        enemy.maxHp = Math.round(enemy.maxHp * 2.1);
+        enemy.hp = enemy.maxHp;
+        enemy.scale *= 1.24;
+        enemy.souls = Math.round(enemy.def.souls * 2.2);
+      }
+      enemy.anim = new Animator(this.sprites[kind]);
+      this.entities.push(enemy);
     }
   }
 
@@ -808,6 +874,93 @@ export class Game {
     return true;
   }
 
+  // What this enemy hits the player for, after the wave scaling.
+  #hitBy(e) {
+    return e.def.damage * (e.damageScale || 1);
+  }
+
+  // A shieldbearer blocks everything but a heavy from the front, which is what
+  // finally gives the heavy attack a job to do.
+  #shieldBrain(e, p, dx, dy, dist, dt) {
+    const want = e.def.reach + p.radius + e.radius - 6;
+    if (dist > want) {
+      e.state = 'chase';
+      // Turn to face you while closing, so you cannot simply run at its side.
+      const a = Math.atan2(dy, dx);
+      return { x: lerp(dx / dist, Math.cos(a), 0.35), y: lerp(dy / dist, Math.sin(a), 0.35) };
+    }
+    e.state = 'guard';
+    if (e.attackCd <= 0) {
+      e.attackCd = e.def.cooldown * 1.3;
+      e.windup = ENEMY_WINDUP * 1.4;
+      e.attackAnim = e.windup + 0.2;
+      e.tellFlash = e.windup;
+    }
+    return { x: 0, y: 0 };
+  }
+
+  // A demon crouches, then lunges in a straight line and has to recover. It
+  // punishes running away in a straight line, which is otherwise free.
+  #chargerBrain(e, p, dx, dy, dist, dt) {
+    if (e.lunge > 0) {
+      e.lunge -= dt;
+      e.state = 'lunge';
+      if (dist < e.radius + p.radius + 8 && this.world.lineOfSight(e.x, e.y, p.x, p.y) && p.hurt(this.#hitBy(e), this.effects, e)) {
+        this.stats.damageTaken += this.#hitBy(e);
+        this.camera.kick(10);
+        this.freeze = 0.06;
+        this.audio?.hurt();
+        this.effects.text(p.x, p.y - 26, `-${Math.round(this.#hitBy(e))}`, '#ff7a7a');
+        e.lunge = 0;
+      }
+      if (e.lunge <= 0) {
+        e.attackCd = e.def.cooldown * 1.6;
+        e.recover = 0.75;
+      }
+      return { x: dx / dist, y: dy / dist };
+    }
+    if (e.recover > 0) {
+      e.recover -= dt;
+      e.state = 'recover';
+      return { x: -dx / dist * 0.5, y: -dy / dist * 0.5 };
+    }
+    if (e.attackCd <= 0 && dist < 230 && this.world.lineOfSight(e.x, e.y, p.x, p.y)) {
+      e.attackCd = e.def.cooldown;
+      e.windup = ENEMY_WINDUP * 1.5;
+      e.attackAnim = e.windup + 0.2;
+      e.tellFlash = e.windup;
+      e.pendingLunge = true;
+    }
+    if (e.pendingLunge && e.windup <= 0) {
+      e.pendingLunge = false;
+      e.lunge = 0.45;
+      this.audio?.dash();
+      this.effects.burst(e.x, e.y - 10, 10, { colour: '#d05a4a', speed: 150, life: 0.3, lift: 10 });
+    }
+    // Hold at the edge of its reach so it winds up from a real distance.
+    if (dist < e.def.reach * 2.2) return { x: 0, y: 0 };
+    e.state = 'chase';
+    return { x: dx / dist, y: dy / dist };
+  }
+
+  // A shaman keeps its distance and repositions, instead of standing still and
+  // shooting, so ranged pressure has to be answered rather than ignored.
+  #kiterBrain(e, p, dx, dy, dist, dt) {
+    const want = e.def.range * 0.62;
+    if (e.windup > 0 || e.attackCd > 0.9) return this.#rangedBrain(e, p, dx, dy, dist, dt);
+    const a = Math.atan2(dy, dx);
+    if (dist < want * 0.7) {
+      e.state = 'retreat';
+      const side = Math.sin(this.time * 1.3 + e.id) > 0 ? 1 : -1;
+      return { x: -Math.cos(a) - Math.sin(a) * side * 0.7, y: -Math.sin(a) + Math.cos(a) * side * 0.7 };
+    }
+    e.state = 'circle';
+    const side = Math.sin(this.time * 1.1 + e.id) > 0 ? 1 : -1;
+    const mx = (-Math.sin(a) * side - Math.cos(a) * 0.35) / 1.2;
+    const my = (Math.cos(a) * side - Math.sin(a) * 0.35) / 1.2;
+    return { x: mx, y: my };
+  }
+
   // The Warlock gets a real fight: it summons, it throws a radial volley, it
   // blinks away when you crowd it, and below a third of its health it stops
   // being polite about any of it.
@@ -856,7 +1009,7 @@ export class Game {
       e.windup -= dt;
       if (e.windup <= 0) {
         const angle = Math.atan2(dy, dx);
-        const dmg = e.def.damage * (enraged ? 1.25 : 1);
+        const dmg = this.#hitBy(e) * (enraged ? 1.25 : 1);
         if (dist < e.radius + p.radius + 12 && this.world.lineOfSight(e.x, e.y, p.x, p.y) && p.hurt(dmg, this.effects, e)) {
           this.stats.damageTaken += dmg;
           this.camera.kick(9);
@@ -1175,6 +1328,20 @@ export class Game {
   }
 
   #damageEnemy(enemy, amount, angle, heavy = false, crit = false) {
+    // A shieldbearer turns to face you, so its front is a real threat and the
+    // only clean answer is the heavy attack.
+    if (enemy.def.role === 'shield' && !heavy && !enemy.dead) {
+      const toPlayer = Math.atan2(this.player.y - enemy.y, this.player.x - enemy.x);
+      let diff = Math.abs(((toPlayer - enemy.facing + Math.PI * 3) % TAU) - Math.PI);
+      if (diff < 0.95) {
+        enemy.flash = 0.1;
+        this.effects.text(enemy.x, enemy.y - enemy.radius * 2.2, 'BLOCKED', '#9fc4ff');
+        this.effects.ring(enemy.x, enemy.y - enemy.radius, { colour: '#9fc4ff', grow: 90, radius: 12, life: 0.22, width: 3 });
+        this.audio?.flesh();
+        return;
+      }
+    }
+
     enemy.hp -= amount;
 
     // Phase breaks read from hp, so they fire exactly once per threshold even
@@ -1299,9 +1466,13 @@ export class Game {
       } else if (e.aggro) {
         move = e.isBoss
           ? this.#bossBrain(e, p, dx, dy, dist, dt)
-          : e.def.ranged
-            ? this.#rangedBrain(e, p, dx, dy, dist, dt)
-            : this.#meleeBrain(e, p, dx, dy, dist, dt);
+          : e.def.role === 'shield'
+            ? this.#shieldBrain(e, p, dx, dy, dist, dt)
+            : e.def.role === 'charger'
+              ? this.#chargerBrain(e, p, dx, dy, dist, dt)
+              : e.def.ranged
+                ? (e.def.role === 'kiter' ? this.#kiterBrain(e, p, dx, dy, dist, dt) : this.#rangedBrain(e, p, dx, dy, dist, dt))
+                : this.#meleeBrain(e, p, dx, dy, dist, dt);
         e.facing = facingFromVector(dx, dy);
       } else {
         e.stateTimer -= dt;
@@ -1402,7 +1573,7 @@ export class Game {
       e.windup -= dt;
       if (e.windup <= 0) {
         const angle = Math.atan2(dy, dx);
-        if (dist < e.radius + p.radius + 12 && this.world.lineOfSight(e.x, e.y, p.x, p.y) && p.hurt(e.def.damage, this.effects, e)) {
+        if (dist < e.radius + p.radius + 12 && this.world.lineOfSight(e.x, e.y, p.x, p.y) && p.hurt(this.#hitBy(e), this.effects, e)) {
           this.stats.damageTaken += e.def.damage;
           this.camera.kick(7);
           this.freeze = 0.05;
@@ -1443,7 +1614,7 @@ export class Game {
         const a = Math.atan2(p.y + p.vy * lead - e.y, p.x + p.vx * lead - e.x);
         this.projectiles.push(
           new Projectile(e.x + Math.cos(a) * (e.radius + 6), e.y + Math.sin(a) * (e.radius + 6) - 8, Math.cos(a) * speed, Math.sin(a) * speed, {
-            damage: e.def.damage,
+            damage: this.#hitBy(e),
             kind: e.def.ranged,
             life: 3,
           }),
@@ -1652,6 +1823,7 @@ export class Game {
     }
 
     this.#drawShadow(ctx, e, sprite, e.scale);
+    this.#drawEliteMark(ctx, e);
     // The windup tell: the enemy flares just before its blow lands.
     if (e.tellFlash > 0) {
       ctx.save();
@@ -1743,16 +1915,16 @@ export class Game {
     if (!p || p.hurtFromTimer <= 0 || p.dead) return;
     const W = this.canvas.width;
     const H = this.canvas.height;
-    const rad = Math.min(W, H) * 0.3;
+    const rad = Math.min(W, H) * 0.33;
     const fade = Math.min(1, p.hurtFromTimer / 0.35);
     ctx.save();
     ctx.translate(W / 2, H / 2);
     ctx.rotate(p.hurtFrom);
-    ctx.globalAlpha = fade * 0.5;
+    ctx.globalAlpha = fade * 0.34;
     ctx.fillStyle = '#ff5a4a';
     ctx.beginPath();
-    ctx.arc(0, 0, rad + 60, -0.42, 0.42);
-    ctx.arc(0, 0, rad, 0.42, -0.42, true);
+    ctx.arc(0, 0, rad + 34, -0.34, 0.34);
+    ctx.arc(0, 0, rad, 0.34, -0.34, true);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
@@ -1760,6 +1932,20 @@ export class Game {
 
   // The generator already bakes a shadow into each frame; this adds the small
   // contact shadow that keeps actors planted on the tile grid.
+  #drawEliteMark(ctx, e) {
+    if (!e.elite) return;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,206,110,0.85)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(e.x, e.y, 15 * e.scale, 15 * e.scale * 0.45, 0, 0, TAU);
+    ctx.stroke();
+    ctx.globalAlpha = 0.18;
+    ctx.fillStyle = '#ffce6e';
+    ctx.fill();
+    ctx.restore();
+  }
+
   #drawShadow(ctx, e, sprite, scale) {
     const r = 11 * scale;
     ctx.save();

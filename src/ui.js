@@ -214,14 +214,44 @@ export class UI {
     const x = this.compact ? 14 : 14;
     const y = this.compact ? 96 : H - 62;
 
-    this.#panel(ctx, x - 6, y - 20, barW + 26, 66);
+    this.#panel(ctx, x - 6, y - 20, barW + 62, 66);
     this.#text(ctx, 'GRIM HOLLOW', x, y - 6, { size: 10, colour: '#8b7fa8' });
 
     this.#bar(ctx, x, y, barW, 12, p.hp / p.maxHp, '#b8362c');
     this.#text(ctx, `${Math.ceil(p.hp)} / ${p.maxHp}`, x + barW / 2, y + 9, { size: 10, colour: '#ffe3d8', align: 'center' });
 
     const dashReady = p.dashCooldown <= 0;
-    this.#bar(ctx, x, y + 18, barW, 5, dashReady ? 1 : 1 - p.dashCooldown / 0.55, dashReady ? '#5e7fd6' : '#2f3d63');
+    this.#bar(ctx, x, y + 18, barW, 5, dashReady ? 1 : 1 - p.dashCooldown / p.dashCdMax, dashReady ? '#5e7fd6' : '#2f3d63');
+
+    // Combo pips. The three-beat chain was fully implemented and completely
+    // invisible - you could not tell which beat you were on or when the window
+    // closed, so there was no timing to learn.
+    const pipX = x + barW + 12;
+    for (let i = 0; i < 3; i++) {
+      const filled = p.comboTimer > 0 && i <= p.comboStep;
+      const active = p.comboTimer > 0 && i === p.comboStep + 1;
+      const cx = pipX + i * 9;
+      const cy = y + 20;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3.4, 0, Math.PI * 2);
+      if (filled) {
+        ctx.fillStyle = '#ffd479';
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = active ? 'rgba(255,212,121,0.95)' : 'rgba(150,130,190,0.5)';
+        ctx.lineWidth = active ? 2 : 1;
+        ctx.stroke();
+        // the live pip drains as the window closes
+        if (active) {
+          const left = clamp(p.comboTimer / p.comboWindow, 0, 1);
+          ctx.strokeStyle = '#ffd479';
+          ctx.lineWidth = 2.6;
+          ctx.beginPath();
+          ctx.arc(cx, cy, 3.4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left);
+          ctx.stroke();
+        }
+      }
+    }
 
     const lvlFrac = p.soulCeiling() > p.soulFloor() ? (p.souls - p.soulFloor()) / (p.soulCeiling() - p.soulFloor()) : 1;
     this.#bar(ctx, x, y + 29, barW, 5, lvlFrac, '#7f9ad6');
@@ -291,6 +321,68 @@ export class UI {
     } else {
       this.#text(ctx, text, W / 2, 20, { size: 11, colour, align: 'center' });
     }
+
+    this.#objectivePointer(ctx, W, H, colour);
+  }
+
+  // "Deep in the south" is not a direction on a 64x64 map. This points at the
+  // next thing worth walking to and says how far it is.
+  #objectivePointer(ctx, W, H, colour) {
+    const g = this.game;
+    const p = g.player;
+    if (!p || p.dead) return;
+    let target = null;
+    if (g.exitOpen && g.extraction) target = g.world.centreOfRect(g.extraction.rect);
+    else if (g.bossSpawned) {
+      const boss = g.entities.find((e) => e.isBoss && !e.dead);
+      if (boss) target = { x: boss.x, y: boss.y };
+      else if (g.world.zone('throne')) target = g.world.centreOfRect(g.world.zone('throne').rect);
+    } else {
+      const zones = g.world.zones.filter((z) => z.kind === 'patrol' && !g.roomsSeen.has(z.id));
+      if (!zones.length) return;
+      let best = null;
+      let bd = Infinity;
+      for (const z of zones) {
+        const c = g.world.centreOfRect(z.rect);
+        const d = Math.hypot(c.x - p.x, c.y - p.y);
+        if (d < bd) {
+          bd = d;
+          best = c;
+        }
+      }
+      target = best;
+    }
+    if (!target) return;
+
+    const a = Math.atan2(target.y - p.y, target.x - p.x);
+    const cx = p.x - g.camera.x;
+    const cy = p.y - g.camera.y;
+    const rad = Math.min(W, H) * 0.33;
+    const alpha = 0.45 + Math.sin(g.time * 3) * 0.12;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(a);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = colour;
+    ctx.beginPath();
+    ctx.moveTo(rad + 13, 0);
+    ctx.lineTo(rad - 5, -8);
+    ctx.lineTo(rad - 5, 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    const metres = Math.round(Math.hypot(target.x - p.x, target.y - p.y) / 32);
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    this.#text(ctx, `${metres}m`, cx + Math.cos(a) * (rad + 26), cy + Math.sin(a) * (rad + 26) + 4, {
+      size: 11,
+      colour,
+      align: 'center',
+      weight: 'bold',
+    });
+    ctx.restore();
   }
 
   #minimap(ctx, W, H) {
@@ -344,12 +436,25 @@ export class UI {
                 ? 'rgba(224,190,120,0.75)'
                 : 'rgba(224,190,120,0.2)';
       ctx.lineWidth = 1;
-      ctx.strokeRect(x + x0 * cell + 0.5, y + y0 * cell + 0.5, (x1 - x0) * cell, (y1 - y0) * cell);
+      ctx.strokeRect(
+        x + x0 * cell + 0.5,
+        y + y0 * cell + 0.5,
+        (x1 - x0 + 1) * cell - 1,
+        (y1 - y0 + 1) * cell - 1,
+      );
+    }
+
+    // Chests: the only source of potions, and invisible on both maps until you
+    // happened to walk within thirty pixels of one.
+    for (const pr of g.world.props) {
+      if (pr.kind !== 'chest' || pr.dead || pr.opened) continue;
+      ctx.fillStyle = '#ffd479';
+      ctx.fillRect(x + (pr.x / map.tileW - 0.8) * cell, y + (pr.y / map.tileH - 0.8) * cell, 2.5, 2.5);
     }
 
     for (const e of g.entities) {
       if (!e.kind || e.dead) continue;
-      ctx.fillStyle = e.isBoss ? '#c08cff' : '#e05a4a';
+      ctx.fillStyle = e.isBoss ? '#c08cff' : e.elite ? '#ffce6e' : '#e05a4a';
       ctx.fillRect(x + (e.x / map.tileW - 0.6) * cell, y + (e.y / map.tileH - 0.6) * cell, 2, 2);
     }
 
