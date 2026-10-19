@@ -135,8 +135,17 @@ google-chrome --headless=new --disable-gpu --virtual-time-budget=120000 \
 | `selftest.html` | scripted playthrough of every room plus the boss | `bossDead=true exitOpen=true` / `final state=won` / `runtime errors: none` |
 | `stress.html` | 40 runs × 900 frames of randomised input, spawning and killing as it goes | `STRESS PASSED: 40 runs x 900 frames` |
 | `perf.html` | counts `drawImage` calls and radial gradients per frame | ~1,250 draws, gradients in single digits |
+| `traverse.html` | flood-fills the real collision from the spawn and checks every zone is reachable | `PASS: every zone is reachable` |
 | `shot.html` | renders one room and screenshots it (`?zone=`, `?s=`, `?touch=1`, `?hp=`) | — |
 
 `selftest` and `stress` are the ones that matter: they run the real game loop, so
 a crash in combat logic shows up as `runtime errors:` rather than only in a
 browser console nobody opens.
+
+`traverse.html` covers the failure none of the others can see. The level shipped
+with rooms whose corridor graph did not connect — the entry hall, stairwell and
+goblin warren were one island, and the other six zones including the boss room
+sat behind solid bedrock with no doorway. 507 of 2190 walkable cells were
+reachable, so the game could not be finished. `selftest` passed the whole time
+because it teleports between rooms. Any change to the map or the collision
+should be checked against it.

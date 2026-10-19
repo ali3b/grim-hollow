@@ -1,0 +1,53 @@
+<!doctype html>
+<!--
+  Is every room actually reachable from the entry hall?
+
+  This is not a theoretical concern. The shipped level had rooms and a
+  corridor graph that did not connect: the entry hall, stairwell and goblin
+  warren formed one island and the other six zones - including the boss room -
+  sat behind solid bedrock with no doorway at all. 507 of 2190 walkable cells
+  were reachable, so the game could not be finished, and no amount of playtesting
+  the combat would have shown it.
+
+  Flood-fills the real collision (same radius as the player, same props) from
+  the spawn zone and reports any zone it cannot reach.
+-->
+<meta charset="utf-8"><body><pre id="out">working...</pre>
+<script type="module">
+import { loadTileset, loadMap, loadJSON, loadSprite } from '/src/assets.js';
+import { World } from '/src/game.js';
+const tileset = await loadTileset('/assets/tilesets/hollow_floor','hollow_floor');
+const map = await loadMap('/assets/maps/hollow_deep', tileset);
+const manifest = await loadJSON('/assets/sprites/index.json');
+const sprites = {};
+for (const n of Object.keys(manifest)) { try { sprites[n] = await loadSprite('/assets/sprites/'+n, n, manifest[n]); } catch(e){} }
+const world = new World(map, tileset, sprites);
+const R=11, W=map.w, H=map.h;
+const idx=(cx,cy)=>cy*W+cx;
+const pass=new Uint8Array(W*H);
+for(let cy=0;cy<H;cy++)for(let cx=0;cx<W;cx++)
+  pass[idx(cx,cy)] = map.circleBlocked((cx+0.5)*map.tileW,(cy+0.5)*map.tileH,R,world.props)?0:1;
+const spawn=world.centreOfRect(world.zone('entry').rect);
+const sx=Math.floor(spawn.x/map.tileW), sy=Math.floor(spawn.y/map.tileH);
+const seen=new Uint8Array(W*H); const q=[[sx,sy]]; seen[idx(sx,sy)]=1;
+while(q.length){const[cx,cy]=q.pop();
+  for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){const nx=cx+dx,ny=cy+dy;
+    if(nx<0||ny<0||nx>=W||ny>=H)continue;const i=idx(nx,ny);
+    if(seen[i]||!pass[i])continue;seen[i]=1;q.push([nx,ny]);}}
+const out=[];
+const reach=seen.reduce((a,b)=>a+b,0), passable=pass.reduce((a,b)=>a+b,0);
+out.push(`passable ${passable}   reachable from spawn ${reach}   (${(100*reach/passable).toFixed(0)}% of walkable space)`);
+out.push('');
+out.push('zone              kind        cells  reachable   pct');
+let bad=0;
+for (const z of world.zones) {
+  const [x0,y0,x1,y1]=z.rect; let tot=0, ok=0;
+  for(let cy=y0;cy<=y1;cy++)for(let cx=x0;cx<=x1;cx++){const i=idx(cx,cy); if(i<0||i>=seen.length)continue; tot++; if(seen[i])ok++;}
+  const pct=tot?(100*ok/tot).toFixed(0):'-';
+  if (ok===0) bad++;
+  out.push(`${(z.id||z.name).padEnd(18)} ${(z.kind||'').padEnd(11)} ${String(tot).padStart(5)} ${String(ok).padStart(9)}   ${pct}%`);
+}
+out.push('');
+out.push(bad ? `FAIL: ${bad} zone(s) unreachable` : 'PASS: every zone is reachable from the entry hall');
+document.getElementById('out').textContent=out.join('\n');
+</script></body></html>
